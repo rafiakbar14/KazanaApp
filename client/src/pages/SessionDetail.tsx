@@ -1467,6 +1467,7 @@ const MobileRecordCard = memo(({ record, sessionId, readOnly, isCompleted, isGud
   const [returned, setReturned] = useState(record.returnedQuantity?.toString() ?? "");
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [batchPhotoOpen, setBatchPhotoOpen] = useState(false);
 
   const productUnits = record.product.units ?? [];
   const hasUnits = isGudang && productUnits.length > 0;
@@ -1654,29 +1655,7 @@ const MobileRecordCard = memo(({ record, sessionId, readOnly, isCompleted, isGud
                 size="sm"
                 className={cn("h-9 rounded-xl transition-all shadow-sm", activeJob ? "border-primary bg-primary/5 text-primary" : "bg-white border-dashed border-primary/30 text-primary")}
                 disabled={!!activeJob}
-                onClick={() => {
-                  const input = document.createElement("input");
-                  input.type = "file";
-                  input.accept = "image/*";
-                  input.multiple = true;
-                  input.setAttribute("capture", "environment");
-                  input.onchange = async (e) => {
-                    const selectedFiles = Array.from((e.target as HTMLInputElement).files || []);
-                    if (selectedFiles.length > 0) {
-                      const compressedFiles: File[] = [];
-                      for (const f of selectedFiles) {
-                        try {
-                          const compressed = await compressImage(f);
-                          compressedFiles.push(compressed);
-                        } catch (err) {
-                          compressedFiles.push(f);
-                        }
-                      }
-                      handlePhotoSelect(compressedFiles);
-                    }
-                  };
-                  input.click();
-                }}
+                onClick={() => setBatchPhotoOpen(true)}
               >
                 {activeJob ? (
                   <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
@@ -1711,6 +1690,13 @@ const MobileRecordCard = memo(({ record, sessionId, readOnly, isCompleted, isGud
         initialIndex={lightboxIndex}
         title={record.product.name}
         productId={record.productId}
+      />
+
+      <BatchPhotoUpload
+        open={batchPhotoOpen}
+        onOpenChange={setBatchPhotoOpen}
+        onUpload={handlePhotoSelect}
+        title={`Foto Opname - ${record.product.name}`}
       />
     </div>
   );
