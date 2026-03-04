@@ -4,7 +4,7 @@ import { useStaff } from "@/hooks/use-staff";
 import { useMotivation } from "@/hooks/use-motivation";
 import type { StaffMember, MotivationMessage } from "@shared/schema";
 import { Link } from "wouter";
-import { Plus, ClipboardList, Calendar, Loader2, Store, Warehouse, Package, User } from "lucide-react";
+import { Plus, ClipboardList, Calendar, Loader2, Store, Warehouse, Package, User, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -50,13 +50,16 @@ export default function Sessions() {
           <h1 className="text-3xl font-display font-bold text-foreground">Opname Sessions</h1>
           <p className="text-muted-foreground mt-2">Track and audit your stock counting sessions.</p>
         </div>
-        {canCount && (
-          <CreateSessionDialog
-            open={isCreateOpen}
-            onOpenChange={setIsCreateOpen}
-            currentLocationType={locationType === "semua" ? "toko" : locationType}
-          />
-        )}
+        <div className="flex items-center gap-2">
+          {role === "admin" && <GDriveSettingsDialog />}
+          {canCount && (
+            <CreateSessionDialog
+              open={isCreateOpen}
+              onOpenChange={setIsCreateOpen}
+              currentLocationType={locationType === "semua" ? "toko" : locationType}
+            />
+          )}
+        </div>
       </div>
 
       <div className="flex flex-col md:flex-row md:items-center gap-3">
@@ -423,6 +426,80 @@ function CreateSessionDialog({
             </Form>
           </>
         )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function GDriveSettingsDialog() {
+  const { data: roleData, refetch } = useRole();
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [remoteName, setRemoteName] = useState(roleData?.gDriveRemote || "gdrive");
+
+  // Sync state with data when it loads or dialog opens
+  useMemo(() => {
+    if (open && roleData?.gDriveRemote) {
+      setRemoteName(roleData.gDriveRemote);
+    }
+  }, [open, roleData]);
+
+  const handleSave = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/user/gdrive-remote", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ remoteName }),
+      });
+      if (!res.ok) throw new Error("Gagal menyimpan");
+      await refetch();
+      setOpen(false);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="icon" className="rounded-xl border-border/50 text-muted-foreground hover:text-primary transition-colors">
+          <Settings className="w-4 h-4" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Konfigurasi Google Drive</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 pt-4">
+          <div className="p-4 bg-primary/5 border border-primary/10 rounded-2xl">
+            <p className="text-sm text-foreground/80 leading-relaxed">
+              Tentukan nama <strong>rclone remote</strong> yang Anda gunakan di VPS untuk backup ini. Setiap admin bisa menggunakan akun berbeda.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Nama Remote Rclone</label>
+            <Input
+              value={remoteName}
+              onChange={(e) => setRemoteName(e.target.value)}
+              placeholder="Contoh: gdrive, gdrive_personal, dll"
+              className="rounded-xl"
+            />
+            <p className="text-[10px] text-muted-foreground italic">
+              *Pastikan remote ini sudah dikonfigurasi melalui `rclone config` di VPS.
+            </p>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <Button onClick={handleSave} disabled={loading} className="rounded-xl px-8 shadow-md">
+              {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Simpan Konfigurasi
+            </Button>
+          </div>
+        </div>
       </DialogContent>
     </Dialog>
   );

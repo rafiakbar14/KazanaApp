@@ -20,6 +20,7 @@ export const users = pgTable("users", {
   email: varchar("email"),
   profileImageUrl: varchar("profile_image_url"),
   adminId: varchar("admin_id"),
+  gDriveRemote: varchar("g_drive_remote"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

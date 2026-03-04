@@ -53,6 +53,7 @@ export const opnameSessions = pgTable("opname_sessions", {
   locationType: text("location_type", { enum: ["toko", "gudang"] }).default("toko"),
   startedByName: text("started_by_name"),
   assignedTo: text("assigned_to"),
+  gDriveUrl: text("g_drive_url"),
 });
 
 export const opnameRecords = pgTable("opname_records", {

@@ -19,10 +19,17 @@ const localUrl = process.env.DATABASE_URL;
 
 // On VPS, we prioritize localUrl (DATABASE_URL) to ensure we use the local Postgres.
 // supabaseUrl is only used as a fallback.
-const databaseUrl = localUrl || supabaseUrl;
+let databaseUrl = localUrl || supabaseUrl;
 
 if (!databaseUrl) {
   throw new Error("SUPABASE_DATABASE_URL or DATABASE_URL must be set.");
+}
+
+// Auto-fallback for local development: if hostname is "db" but we're not inside Docker/Production
+// Also check if we're on Windows, as 'db' is definitely a Docker-only hostname
+if (databaseUrl.includes('@db') && (process.env.NODE_ENV !== 'production' || process.platform === 'win32')) {
+  console.log('[db] Running in development/Windows mode, switching host from "db" to "localhost"...');
+  databaseUrl = databaseUrl.replace('@db', '@localhost');
 }
 
 console.log(`[db] Memulai koneksi database...`);

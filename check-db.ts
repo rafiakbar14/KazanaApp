@@ -2,8 +2,13 @@ import pg from 'pg';
 import dotenv from 'dotenv';
 dotenv.config();
 
+let databaseUrl = process.env.DATABASE_URL;
+if (databaseUrl && process.env.NODE_ENV !== 'production' && databaseUrl.includes('@db:')) {
+    databaseUrl = databaseUrl.replace('@db:', '@localhost:');
+}
+
 const pool = new pg.Pool({
-    connectionString: process.env.DATABASE_URL,
+    connectionString: databaseUrl,
 });
 
 async function checkSchema() {

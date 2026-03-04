@@ -42,6 +42,7 @@ export interface IStorage {
   getSession(id: number): Promise<OpnameSessionWithRecords | undefined>;
   createSession(session: InsertOpnameSession): Promise<OpnameSession>;
   completeSession(id: number): Promise<OpnameSession>;
+  setSessionGDriveUrl(id: number, url: string): Promise<OpnameSession>;
 
   updateRecord(sessionId: number, productId: number, actualStock: number, notes?: string, unitValues?: string, countedBy?: string, returnedQuantity?: number, returnedNotes?: string): Promise<OpnameRecord>;
   updateRecordPhoto(sessionId: number, productId: number, photoUrl: string): Promise<OpnameRecord>;
@@ -212,6 +213,14 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
+    return session;
+  }
+
+  async setSessionGDriveUrl(id: number, gDriveUrl: string): Promise<OpnameSession> {
+    const [session] = await db.update(opnameSessions)
+      .set({ gDriveUrl })
+      .where(eq(opnameSessions.id, id))
+      .returning();
     return session;
   }
 

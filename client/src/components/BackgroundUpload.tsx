@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 interface UploadJob {
   id: string;
   label: string;
+  productId?: number;
   total: number;
   status: "pending" | "uploading" | "done" | "error";
   progress: number;
@@ -13,13 +14,15 @@ interface UploadJob {
 type SingleFileUploadFn = (file: File) => Promise<void>;
 
 interface BackgroundUploadContextType {
-  addUploadJob: (label: string, files: File[], uploadFn: SingleFileUploadFn) => void;
+  addUploadJob: (label: string, files: File[], uploadFn: SingleFileUploadFn, productId?: number) => void;
   activeCount: number;
+  jobs: UploadJob[];
 }
 
 const BackgroundUploadContext = createContext<BackgroundUploadContextType>({
   addUploadJob: () => { },
   activeCount: 0,
+  jobs: [],
 });
 
 export function useBackgroundUpload() {
@@ -79,10 +82,11 @@ export function BackgroundUploadProvider({ children }: { children: React.ReactNo
     cleanupTimersRef.current.add(timer);
   }, [toast]);
 
-  const addUploadJob = useCallback((label: string, files: File[], uploadFn: SingleFileUploadFn) => {
+  const addUploadJob = useCallback((label: string, files: File[], uploadFn: SingleFileUploadFn, productId?: number) => {
     const job: UploadJob = {
       id: (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : Math.random().toString(36).substring(2) + Date.now().toString(36),
       label,
+      productId,
       total: files.length,
       status: "pending",
       progress: 0,
@@ -100,7 +104,7 @@ export function BackgroundUploadProvider({ children }: { children: React.ReactNo
   }, []);
 
   return (
-    <BackgroundUploadContext.Provider value={{ addUploadJob, activeCount }}>
+    <BackgroundUploadContext.Provider value={{ addUploadJob, activeCount, jobs }}>
       {children}
       {jobs.length > 0 && (
         <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-[320px]" data-testid="upload-progress-container">

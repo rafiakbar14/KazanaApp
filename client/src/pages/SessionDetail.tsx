@@ -255,8 +255,33 @@ export default function SessionDetail() {
   }
   if (!session) return <div className="p-12 text-center text-muted-foreground">Session not found</div>;
 
+  const isBackedUp = (session as any).isBackedUp;
+  const gDriveUrl = (session as any).gDriveUrl;
+
   return (
     <div className="space-y-6 animate-enter pb-12">
+      {isBackedUp && (
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-3 text-amber-800 shadow-sm animate-in fade-in slide-in-from-top-4 duration-500">
+          <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
+            <AlertTriangle className="w-5 h-5 text-amber-600" />
+          </div>
+          <div>
+            <p className="font-bold">File Sudah Di-backup</p>
+            <p className="text-sm opacity-90">File foto untuk sesi ini sudah tidak bisa diakses di aplikasi karena sudah di-backup ke Google Drive untuk menghemat ruang VPS.</p>
+            {gDriveUrl && gDriveUrl !== "no_photos" && gDriveUrl !== "done_no_link" && !gDriveUrl.startsWith('backed_up_') && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-2 bg-white text-amber-700 border-amber-200 hover:bg-amber-100 font-bold"
+                onClick={() => window.open(gDriveUrl, '_blank')}
+              >
+                <FileArchive className="w-4 h-4 mr-2" />
+                Buka Folder di Google Drive
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex items-center gap-4">
           <Button variant="outline" size="icon" onClick={() => setLocation("/sessions")} data-testid="button-back">
@@ -315,7 +340,7 @@ export default function SessionDetail() {
           </div>
 
           <div className="flex items-center gap-2 flex-wrap justify-end">
-            {hasPhotos && (
+            {hasPhotos && !isBackedUp && (
               <Button variant="outline" onClick={() => setDownloadDialogOpen(true)} data-testid="button-download-zip">
                 <FileArchive className="w-4 h-4 mr-2" />
                 Download Foto ZIP
@@ -461,6 +486,7 @@ export default function SessionDetail() {
                   isCompleted={isCompleted}
                   isGudang={session.locationType === "gudang"}
                   currentCounter={currentCounter}
+                  isBackedUp={isBackedUp}
                 />
               ))}
             </tbody>
@@ -479,6 +505,7 @@ export default function SessionDetail() {
             isCompleted={isCompleted}
             isGudang={session.locationType === "gudang"}
             currentCounter={currentCounter}
+            isBackedUp={isBackedUp}
           />
         ))}
       </div>
@@ -965,7 +992,7 @@ function PhotoLightbox({ open, onOpenChange, photos, initialIndex, title, produc
   );
 }
 
-const RecordRow = memo(({ record, sessionId, readOnly, isCompleted, isGudang, currentCounter }: { record: OpnameRecordWithProduct; sessionId: number; readOnly: boolean; isCompleted: boolean; isGudang: boolean; currentCounter: string }) => {
+const RecordRow = memo(({ record, sessionId, readOnly, isCompleted, isGudang, currentCounter, isBackedUp }: { record: OpnameRecordWithProduct; sessionId: number; readOnly: boolean; isCompleted: boolean; isGudang: boolean; currentCounter: string; isBackedUp?: boolean }) => {
   const updateRecord = useUpdateRecord();
   const uploadPhoto = useUploadRecordPhoto();
   const deletePhoto = useDeleteRecordPhoto();
@@ -975,6 +1002,8 @@ const RecordRow = memo(({ record, sessionId, readOnly, isCompleted, isGudang, cu
   const [isFocused, setIsFocused] = useState(false);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
+  const { jobs } = useBackgroundUpload();
+  const activeJob = jobs.find(j => j.productId === record.productId && (j.status === "uploading" || j.status === "pending"));
 
   const productUnits = record.product.units ?? [];
   const hasUnits = isGudang && productUnits.length > 0;
@@ -1088,7 +1117,7 @@ const RecordRow = memo(({ record, sessionId, readOnly, isCompleted, isGudang, cu
           { onSuccess: () => resolve(), onError: (err) => reject(err) }
         );
       });
-    });
+    }, pid);
   }, [uploadPhoto, sessionId, record.productId, record.product.name, addUploadJob]);
 
   const handleDeletePhoto = (photoId: number) => {
@@ -1216,7 +1245,9 @@ const RecordRow = memo(({ record, sessionId, readOnly, isCompleted, isGudang, cu
         )}
         <td className="px-6 py-3">
           <div className="flex items-center justify-center gap-1 flex-wrap">
-            {allPhotos.length > 0 ? (
+            {isBackedUp ? (
+              <span className="text-[10px] text-amber-600 font-medium bg-amber-50 px-2 py-1 rounded-md border border-amber-100">DIPINDAH KE GDRIVE</span>
+            ) : allPhotos.length > 0 ? (
               allPhotos.map((photo, idx) => (
                 <div key={photo.id} className="relative group">
                   <button
@@ -1264,15 +1295,31 @@ const RecordRow = memo(({ record, sessionId, readOnly, isCompleted, isGudang, cu
                 <Camera className="w-4 h-4" />
               </div>
             )}
-            {!readOnly && (
-              <Button
-                variant="outline"
-                size="icon"
-                onClick={() => setBatchPhotoOpen(true)}
-                data-testid={`button-batch-photo-${record.productId}`}
-              >
-                <Camera className="w-4 h-4" />
-              </Button>
+            {!readOnly && !isBackedUp && (
+              <div className="flex flex-col items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className={cn("rounded-xl transition-all", activeJob ? "border-primary bg-primary/5" : "")}
+                  onClick={() => setBatchPhotoOpen(true)}
+                  disabled={!!activeJob}
+                  data-testid={`button-batch-photo-${record.productId}`}
+                >
+                  {activeJob ? (
+                    <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                  ) : (
+                    <Camera className="w-4 h-4" />
+                  )}
+                </Button>
+                {activeJob && (
+                  <div className="w-12 h-1 bg-muted rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary transition-all duration-300"
+                      style={{ width: `${(activeJob.progress / activeJob.total) * 100}%` }}
+                    />
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </td>
@@ -1411,10 +1458,11 @@ function SessionCategoryPriorityDialog({ open, onOpenChange, categories }: {
   );
 }
 
-const MobileRecordCard = memo(({ record, sessionId, readOnly, isCompleted, isGudang, currentCounter }: { record: OpnameRecordWithProduct; sessionId: number; readOnly: boolean; isCompleted: boolean; isGudang: boolean; currentCounter: string }) => {
+const MobileRecordCard = memo(({ record, sessionId, readOnly, isCompleted, isGudang, currentCounter, isBackedUp }: { record: OpnameRecordWithProduct; sessionId: number; readOnly: boolean; isCompleted: boolean; isGudang: boolean; currentCounter: string; isBackedUp?: boolean }) => {
   const updateRecord = useUpdateRecord();
   const uploadPhoto = useUploadRecordPhoto();
   const deletePhoto = useDeleteRecordPhoto();
+  const { addUploadJob, jobs } = useBackgroundUpload();
   const [actual, setActual] = useState(record.actualStock?.toString() ?? "");
   const [returned, setReturned] = useState(record.returnedQuantity?.toString() ?? "");
   const [lightboxOpen, setLightboxOpen] = useState(false);
@@ -1492,6 +1540,23 @@ const MobileRecordCard = memo(({ record, sessionId, readOnly, isCompleted, isGud
     }
   };
 
+  const activeJob = jobs.find(j => j.productId === record.productId && (j.status === "uploading" || j.status === "pending"));
+
+  const handlePhotoSelect = async (files: File[]) => {
+    const sid = sessionId;
+    const pid = record.productId;
+    const label = record.product.name;
+
+    addUploadJob(label, files, (file) => {
+      return new Promise<void>((resolve, reject) => {
+        uploadPhoto.mutate(
+          { sessionId: sid, productId: pid, file },
+          { onSuccess: () => resolve(), onError: (err) => reject(err) }
+        );
+      });
+    }, pid);
+  };
+
   return (
     <div className="bg-card border border-border/50 rounded-2xl p-4 space-y-4 shadow-sm">
       <div className="flex items-start gap-3">
@@ -1561,52 +1626,81 @@ const MobileRecordCard = memo(({ record, sessionId, readOnly, isCompleted, isGud
 
       <div className="pt-2 border-t border-border/50 flex items-center justify-between">
         <div className="flex -space-x-2 overflow-hidden">
-          {allPhotos.slice(0, 3).map((p, i) => (
-            <img key={p.id} src={p.url} className="w-8 h-8 rounded-full border-2 border-card object-cover" alt="" />
-          ))}
-          {allPhotos.length > 3 && (
-            <div className="w-8 h-8 rounded-full border-2 border-card bg-muted flex items-center justify-center text-[10px] font-bold">
-              +{allPhotos.length - 3}
-            </div>
-          )}
-          {allPhotos.length === 0 && (
-            <div className="w-8 h-8 rounded-full border-2 border-dashed border-border/50 flex items-center justify-center text-muted-foreground/30">
-              <Camera className="w-4 h-4" />
-            </div>
+          {isBackedUp ? (
+            <span className="text-[10px] text-amber-600 font-medium px-2 py-1">Di-backup ke GDrive</span>
+          ) : (
+            <>
+              {allPhotos.slice(0, 3).map((p, i) => (
+                <img key={p.id} src={p.url} className="w-8 h-8 rounded-full border-2 border-card object-cover" alt="" />
+              ))}
+              {allPhotos.length > 3 && (
+                <div className="w-8 h-8 rounded-full border-2 border-card bg-muted flex items-center justify-center text-[10px] font-bold">
+                  +{allPhotos.length - 3}
+                </div>
+              )}
+              {allPhotos.length === 0 && (
+                <div className="w-8 h-8 rounded-full border-2 border-dashed border-border/50 flex items-center justify-center text-muted-foreground/30">
+                  <Camera className="w-4 h-4" />
+                </div>
+              )}
+            </>
           )}
         </div>
         <div className="flex gap-2">
-          {!readOnly && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 rounded-xl bg-white border-dashed border-primary/30 text-primary"
-              onClick={() => {
-                const input = document.createElement("input");
-                input.type = "file";
-                input.accept = "image/*";
-                input.setAttribute("capture", "environment");
-                input.onchange = (e) => {
-                  const files = Array.from((e.target as HTMLInputElement).files || []);
-                  if (files.length > 0) {
-                    files.forEach(file => {
-                      uploadPhoto.mutate({ sessionId, productId: record.productId, file });
-                    });
-                  }
-                };
-                input.click();
-              }}
-            >
-              <Camera className="w-3.5 h-3.5 mr-1.5" />
-              Foto
-            </Button>
+          {!readOnly && !isBackedUp && (
+            <div className="flex flex-col items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className={cn("h-9 rounded-xl transition-all shadow-sm", activeJob ? "border-primary bg-primary/5 text-primary" : "bg-white border-dashed border-primary/30 text-primary")}
+                disabled={!!activeJob}
+                onClick={() => {
+                  const input = document.createElement("input");
+                  input.type = "file";
+                  input.accept = "image/*";
+                  input.multiple = true;
+                  input.setAttribute("capture", "environment");
+                  input.onchange = async (e) => {
+                    const selectedFiles = Array.from((e.target as HTMLInputElement).files || []);
+                    if (selectedFiles.length > 0) {
+                      const compressedFiles: File[] = [];
+                      for (const f of selectedFiles) {
+                        try {
+                          const compressed = await compressImage(f);
+                          compressedFiles.push(compressed);
+                        } catch (err) {
+                          compressedFiles.push(f);
+                        }
+                      }
+                      handlePhotoSelect(compressedFiles);
+                    }
+                  };
+                  input.click();
+                }}
+              >
+                {activeJob ? (
+                  <Loader2 className="w-3.5 h-3.5 mr-1.5 animate-spin" />
+                ) : (
+                  <Camera className="w-3.5 h-3.5 mr-1.5" />
+                )}
+                {activeJob ? `Mengupload (${activeJob.progress}/${activeJob.total})` : "Ambil Foto"}
+              </Button>
+              {activeJob && (
+                <Progress
+                  value={(activeJob.progress / activeJob.total) * 100}
+                  className="h-1.5 w-full bg-muted/50"
+                />
+              )}
+            </div>
           )}
-          <Button variant="ghost" size="sm" className="h-8 rounded-xl text-muted-foreground" onClick={() => {
-            if (allPhotos.length > 0) {
-              setLightboxIndex(0);
-              setLightboxOpen(true);
-            }
-          }}>Lihat</Button>
+          {!isBackedUp && (
+            <Button variant="ghost" size="sm" className="h-8 rounded-xl text-muted-foreground" onClick={() => {
+              if (allPhotos.length > 0) {
+                setLightboxIndex(0);
+                setLightboxOpen(true);
+              }
+            }}>Lihat</Button>
+          )}
         </div>
       </div>
 

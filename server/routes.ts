@@ -111,6 +111,9 @@ export async function registerRoutes(
           hasSupabase: !!process.env.SUPABASE_DATABASE_URL,
           hasLocal: !!process.env.DATABASE_URL,
           nodeEnv: process.env.NODE_ENV,
+          platform: process.platform,
+          // Masked connection string for debugging
+          dbUrl: (await import("./db")).pool.options.connectionString?.replace(/:([^:@]+)@/, ":****@"),
         }
       });
     } catch (err: any) {
@@ -131,7 +134,14 @@ export async function registerRoutes(
     if (!roleRecord) {
       roleRecord = await storage.setUserRole({ userId, role: "stock_counter" });
     }
-    res.json(roleRecord);
+
+    // Fetch gDriveRemote from users table
+    const user = await authStorage.getUser(userId);
+
+    res.json({
+      ...roleRecord,
+      gDriveRemote: user?.gDriveRemote || null
+    });
   });
 
   app.get(api.roles.list.path, isAuthenticated, requireRole("admin"), async (req, res) => {
@@ -633,7 +643,17 @@ export async function registerRoutes(
     if (role === "stock_counter_gudang") effectiveLocationType = "gudang";
 
     const sessions = await storage.getSessions(adminId, effectiveLocationType);
-    res.json(sessions);
+
+    // Check for backup status (simple version for list)
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+
+    const sessionsWithStatus = sessions.map(s => ({
+      ...s,
+      isBackedUp: new Date(s.startedAt) < threeDaysAgo && s.status === 'completed'
+    }));
+
+    res.json(sessionsWithStatus);
   });
 
   app.post(api.sessions.create.path, isAuthenticated, requireRole("admin", "stock_counter", "stock_counter_toko", "stock_counter_gudang"), async (req, res) => {
@@ -657,7 +677,47 @@ export async function registerRoutes(
     if (!session || session.userId !== adminId) {
       return res.status(404).json({ message: 'Session not found' });
     }
-    res.json(session);
+
+    // Check if session is older than 3 days
+    const threeDaysAgo = new Date();
+    threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+    const isOld = new Date(session.startedAt) < threeDaysAgo;
+
+    // Check if files exist locally for a more accurate isBackedUp
+    let hasLocalFiles = false;
+    const checkFile = (url: string | null) => {
+      if (!url || url.startsWith('http')) return false;
+      const filePath = path.join(process.cwd(), url.replace(/^\//, ''));
+      return fs.existsSync(filePath);
+    };
+
+    for (const record of session.records) {
+      if (checkFile(record.photoUrl) || (record.photos && record.photos.some(p => checkFile(p.url)))) {
+        hasLocalFiles = true;
+        break;
+      }
+    }
+
+    const sessionWithBackupStatus = {
+      ...session,
+      isBackedUp: isOld && !hasLocalFiles && session.records.some(r => r.photoUrl || (r.photos && r.photos.length > 0))
+    };
+
+    res.json(sessionWithBackupStatus);
+  });
+
+  app.patch("/api/user/gdrive-remote", isAuthenticated, requireRole("admin"), async (req, res) => {
+    try {
+      const { remoteName } = z.object({ remoteName: z.string().min(1) }).parse(req.body);
+      const userId = getUserId(req);
+      await authStorage.updateUser(userId, { gDriveRemote: remoteName });
+      res.json({ message: "Konfigurasi remote Google Drive berhasil disimpan" });
+    } catch (err) {
+      if (err instanceof z.ZodError) {
+        return res.status(400).json({ message: "Format nama remote tidak valid" });
+      }
+      res.status(500).json({ message: "Gagal menyimpan konfigurasi" });
+    }
   });
 
   app.post(api.sessions.complete.path, isAuthenticated, requireRole("admin", "stock_counter", "stock_counter_toko", "stock_counter_gudang"), async (req, res) => {
