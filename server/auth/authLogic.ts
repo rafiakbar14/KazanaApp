@@ -12,8 +12,13 @@ export function getSession() {
     ttl: sessionTtl / 1000,
     tableName: "sessions",
   });
+  const secret = process.env.SESSION_SECRET || "kazana-default-fallback-secret-2024";
+  if (!process.env.SESSION_SECRET && process.env.NODE_ENV === "production") {
+    console.warn("[auth] WARNING: SESSION_SECRET is missing! Using fallback. Please check your .env file.");
+  }
+
   return session({
-    secret: process.env.SESSION_SECRET!,
+    secret: secret,
     store: sessionStore,
     resave: false,
     saveUninitialized: false,
@@ -23,6 +28,7 @@ export function getSession() {
       maxAge: sessionTtl,
     },
   });
+
 }
 
 export async function setupAuth(app: Express) {
