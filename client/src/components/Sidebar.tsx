@@ -7,7 +7,7 @@ import { useRole } from "@/hooks/use-role";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { useBackgroundUpload } from "@/hooks/../components/BackgroundUpload";
+import { useBackgroundUpload } from "@/components/BackgroundUpload";
 import { Loader2, Upload } from "lucide-react";
 
 

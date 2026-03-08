@@ -147,6 +147,8 @@ export function BatchPhotoUpload({ open, onOpenChange, onUpload, title = "Ambil 
     e.target.value = "";
   }, []);
 
+  const { addUploadJob } = useBackgroundUpload();
+
   const handleUploadAll = useCallback(async () => {
     if (photos.length === 0) return;
     setIsUploading(true);
@@ -160,11 +162,16 @@ export function BatchPhotoUpload({ open, onOpenChange, onUpload, title = "Ambil 
         const compressed = await compressImage(file);
         files.push(compressed);
       }
+
+      // Use background upload instead of waiting here
+      addUploadJob(title, files, onUpload, undefined);
+
       photos.forEach(p => URL.revokeObjectURL(p.previewUrl));
       setPhotos([]);
       stopCamera();
       onOpenChange(false);
-      onUpload(files);
+
+      toast({ title: "Upload Dimulai", description: `${files.length} foto sedang diproses di latar belakang.` });
     } catch (err) {
       if (mountedRef.current) {
         toast({ title: "Gagal Memproses", description: "Terjadi kesalahan saat memproses foto.", variant: "destructive" });
@@ -172,7 +179,8 @@ export function BatchPhotoUpload({ open, onOpenChange, onUpload, title = "Ambil 
     } finally {
       if (mountedRef.current) setIsUploading(false);
     }
-  }, [photos, onUpload, stopCamera, onOpenChange, toast]);
+  }, [photos, onUpload, stopCamera, onOpenChange, toast, addUploadJob, title]);
+
 
   useEffect(() => {
     if (open) {
@@ -276,12 +284,13 @@ export function BatchPhotoUpload({ open, onOpenChange, onUpload, title = "Ambil 
             <Button
               variant="outline"
               size="sm"
-              className="bg-black/40 border-white/20 text-white rounded-full backdrop-blur-md hover:bg-black/60 font-bold px-4"
+              className="bg-amber-400 border-amber-500 text-amber-950 rounded-full shadow-lg hover:bg-amber-500 font-bold px-4 h-10 animate-in fade-in zoom-in duration-500"
               onClick={() => nativeCameraInputRef.current?.click()}
             >
-              <Camera className="w-4 h-4 mr-2" />
-              Kamera Sistem (Stabil)
+              <Camera className="w-5 h-5 mr-2" />
+              Ambil Foto Kamera (Rekomendasi)
             </Button>
+
           </div>
 
 
