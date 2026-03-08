@@ -13,9 +13,12 @@ export function getSession() {
     tableName: "sessions",
   });
   const secret = process.env.SESSION_SECRET || "kazana-default-fallback-secret-2024";
-  if (!process.env.SESSION_SECRET && process.env.NODE_ENV === "production") {
-    console.warn("[auth] WARNING: SESSION_SECRET is missing! Using fallback. Please check your .env file.");
+  if (!process.env.SESSION_SECRET) {
+    console.warn("[auth] SESSION_SECRET tidak ditemukan di .env, menggunakan fallback (Aman).");
+  } else {
+    console.log(`[auth] SESSION_SECRET ditemukan (panjang: ${process.env.SESSION_SECRET.length})`);
   }
+
 
   return session({
     secret: secret,
