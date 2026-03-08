@@ -16,12 +16,16 @@ try {
                 if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
                     value = value.substring(1, value.length - 1);
                 }
-                if (!process.env[key]) {
-                    process.env[key] = value;
-                }
+                // ALWAYS use .env values to ensure synchronization with what user edits
+                process.env[key] = value;
             }
         });
-        console.log("[env] File .env berhasil dimuat secara manual.");
+        console.log("[env] File .env berhasil dimuat dan di-sinkronkan.");
+        if (process.env.DATABASE_URL) {
+            const url = process.env.DATABASE_URL;
+            const masked = url.replace(/:([^:@]+)@/, ":****@");
+            console.log(`[env] DATABASE_URL saat ini: ${masked}`);
+        }
     } else {
         console.warn("[env] File .env tidak ditemukan di:", envPath);
     }
