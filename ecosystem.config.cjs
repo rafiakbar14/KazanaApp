@@ -1,11 +1,9 @@
-const path = require('path');
-
 module.exports = {
     apps: [
         {
             name: "kazana-app",
-            script: "node",
-            args: "--env-file=.env dist/index.cjs",
+            script: "dist/index.cjs",
+            node_args: "--env-file=.env",
             instances: "max",
             exec_mode: "cluster",
             env: {
@@ -15,4 +13,5 @@ module.exports = {
         }
     ]
 };
+
 
