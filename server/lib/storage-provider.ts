@@ -34,8 +34,8 @@ export class StorageService {
             }
 
             // Return the relative URL that the server can serve (via express.static)
-            // Example: /uploads/123456789_test.jpg
-            return `/uploads/${uniqueFileName}`;
+            console.log(`Local file uploaded successfully: ${uniqueFileName}`);
+            return `/api/uploads/${uniqueFileName}`;
         } catch (error: any) {
             throw new Error(`Local file upload failed: ${error.message}`);
         }

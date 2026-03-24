@@ -10,7 +10,7 @@ const app = express();
 const httpServer = createServer(app);
 
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
-
+app.use("/api/uploads", express.static(path.join(process.cwd(), "uploads")));
 declare module "http" {
   interface IncomingMessage {
     rawBody: unknown;

@@ -48,7 +48,7 @@ async function migrateData() {
                 const columns = fields.map(f => `"${f.name}"`).join(", ");
                 const values = fields.map((_, i) => `$${i + 1}`).join(", ");
                 const params = fields.map(f => row[f.name]);
-                
+
                 // Gunakan ON CONFLICT DO NOTHING agar tidak error jika id sudah ada
                 await targetPool.query(`INSERT INTO ${table} (${columns}) VALUES (${values}) ON CONFLICT DO NOTHING`, params);
             }
@@ -64,7 +64,7 @@ async function migrateData() {
                 const url = row.url as string;
                 if (url.includes("supabase.co") || url.includes("/objects/uploads/")) {
                     const fileName = url.split('/').pop();
-                    const newLocalUrl = `/uploads/${fileName}`;
+                    const newLocalUrl = `/api/uploads/${fileName}`;
                     await targetPool.query(`UPDATE ${tableName} SET ${colName} = $1 WHERE id = $2`, [newLocalUrl, row.id]);
                     count++;
                 }
