@@ -165,8 +165,8 @@ export function BatchPhotoUpload({ open, onOpenChange, onUpload, title = "Ambil 
         files.push(compressed);
       }
 
-      // Use background upload instead of waiting here
-      addUploadJob(title, files, onUpload, undefined);
+      // Let the parent onUpload handle the background job
+      await onUpload(files);
 
       photos.forEach(p => URL.revokeObjectURL(p.previewUrl));
       setPhotos([]);
