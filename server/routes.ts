@@ -477,6 +477,26 @@ export async function registerRoutes(
       res.status(500).json({ message: "Upload failed" });
     }
   });
+  // === DEBUG PHOTOS ===
+  app.get('/api/debug-photos', async (req, res) => {
+    try {
+      const records = await db.query.opnameRecords.findMany({
+        with: { photos: true },
+        limit: 50,
+        orderBy: (opnameRecords, { desc }) => [desc(opnameRecords.id)]
+      });
+      res.json({
+        recentRecords: records.map(r => ({
+          id: r.id, sessionId: r.sessionId, productId: r.productId,
+          photoUrl: r.photoUrl,
+          photosCount: r.photos?.length,
+          photos: r.photos
+        }))
+      });
+    } catch (err) {
+      res.status(500).json({ error: String(err) });
+    }
+  });
 
   // === Opname Record Photos (multi-photo for SO) ===
   app.post(api.recordPhotos.upload.path, isAuthenticated, upload.single("photo"), async (req, res) => {
