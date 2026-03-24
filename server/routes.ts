@@ -9,6 +9,18 @@ import path from "path";
 import fs from "fs";
 import os from "os";
 import * as XLSX from "xlsx";
+
+const LOG_PATH = "/tmp/debug-upload.txt";
+
+function diskLog(msg: string) {
+  try {
+    const logMsg = `${new Date().toISOString()} - ${msg}\n`;
+    fs.appendFileSync(LOG_PATH, logMsg);
+    console.log(`[DISKLOG] ${logMsg.trim()}`);
+  } catch (e) {
+    console.error("DISK LOG FAILED TO WRITE:", e);
+  }
+}
 import { authStorage } from "./auth/storage";
 import archiver from "archiver";
 import { productPhotos, opnameRecordPhotos } from "@shared/schema";
@@ -484,10 +496,9 @@ export async function registerRoutes(
   // === DEBUG PHOTOS ===
   app.get('/api/debug-photos', async (req, res) => {
     try {
-      const logPath = path.join(process.cwd(), 'debug-upload.txt');
-      let logs = "Log file not found.";
-      if (fs.existsSync(logPath)) {
-        logs = fs.readFileSync(logPath, 'utf8');
+      let logs = "Log file not found at " + LOG_PATH;
+      if (fs.existsSync(LOG_PATH)) {
+        logs = fs.readFileSync(LOG_PATH, 'utf8');
       }
 
       const { execSync } = await import('child_process');
@@ -500,7 +511,7 @@ export async function registerRoutes(
 
       res.json({
         disk: diskInfo,
-        logs: logs.split('\n').length > 30 ? logs.split('\n').slice(-30).join('\n') : logs
+        logs: logs.split('\n').length > 50 ? logs.split('\n').slice(-50).join('\n') : logs
       });
     } catch (err) {
       res.status(500).json({ error: String(err) });
