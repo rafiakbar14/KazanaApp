@@ -27,7 +27,8 @@ if (!databaseUrl) {
 
 // Auto-fallback for local development or host-based deployments: 
 // If hostname is "db" but we're on Windows or NOT in a Docker environment
-const isDocker = process.env.IS_DOCKER === 'true' || require('fs').existsSync('/.dockerenv');
+import fs from 'fs';
+const isDocker = process.env.IS_DOCKER === 'true' || fs.existsSync('/.dockerenv');
 if (databaseUrl.includes('@db') && (!isDocker || process.platform === 'win32')) {
   console.log('[db] Host "db" detected on non-docker/Windows environment. Switching to "localhost"...');
   databaseUrl = databaseUrl.replace('@db', '@localhost');
