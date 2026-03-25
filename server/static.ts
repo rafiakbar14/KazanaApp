@@ -13,7 +13,7 @@ export function serveStatic(app: Express) {
   app.use(express.static(distPath));
 
   // Handle any unhandled /api/* routes first to return JSON 404 instead of index.html
-  app.all("/api/(.*)", (req, res) => {
+  app.all("/api/:path*", (req, res) => {
     res.status(404).json({
       message: `API Route ${req.method} ${req.path} not found`,
       error: "Not Found"
@@ -21,7 +21,7 @@ export function serveStatic(app: Express) {
   });
 
   // Fallback all other routes to index.html for SPA routing
-  app.use("(.*)", (_req, res) => {
+  app.use((_req, res) => {
     res.sendFile(path.resolve(distPath, "index.html"));
   });
 }
