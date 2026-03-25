@@ -14,7 +14,7 @@ function maskUrl(url: string) {
   }
 }
 
-const databaseUrl = process.env.DATABASE_URL;
+let databaseUrl = process.env.DATABASE_URL;
 
 if (!databaseUrl) {
   throw new Error("DATABASE_URL must be set (postgresql://user:pass@host:5432/dbname)");
