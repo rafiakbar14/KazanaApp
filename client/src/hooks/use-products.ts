@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
-import { type Product, type CategoryPriority } from "@shared/schema";
+import { type Product, type CategoryPriority, type Category, type Unit } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 
@@ -177,12 +177,141 @@ export function useDeleteProductUnit() {
 }
 
 export function useCategories() {
-  return useQuery<string[]>({
-    queryKey: [api.products.categories.path],
+  return useQuery<Category[]>({
+    queryKey: [api.categories.list.path],
     queryFn: async () => {
-      const res = await fetch(api.products.categories.path, { credentials: "include" });
+      const res = await fetch(api.categories.list.path, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch categories");
       return res.json();
+    },
+  });
+}
+
+export function useCreateCategory() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (data: { name: string; description?: string }) => {
+      const res = await apiRequest("POST", api.categories.create.path, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.categories.list.path] });
+      toast({ title: "Kategori Dibuat", description: "Kategori baru berhasil ditambahkan." });
+    },
+    onError: (error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+}
+
+export function useUpdateCategory() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ id, ...data }: { id: number; name?: string; description?: string }) => {
+      const url = buildUrl(api.categories.update.path, { id });
+      const res = await apiRequest("PUT", url, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.categories.list.path] });
+      toast({ title: "Kategori Diperbarui", description: "Detail kategori berhasil disimpan." });
+    },
+    onError: (error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+}
+
+export function useDeleteCategory() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const url = buildUrl(api.categories.delete.path, { id });
+      const res = await fetch(url, { method: "DELETE", credentials: "include" });
+      if (!res.ok) throw new Error("Failed to delete category");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.categories.list.path] });
+      toast({ title: "Kategori Dihapus", description: "Kategori berhasil dihapus dari sistem." });
+    },
+    onError: (error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+}
+
+export function useUnits() {
+  return useQuery<Unit[]>({
+    queryKey: [api.units.list.path],
+    queryFn: async () => {
+      const res = await fetch(api.units.list.path, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch units");
+      return res.json();
+    },
+  });
+}
+
+export function useCreateUnit() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (data: { name: string; description?: string }) => {
+      const res = await apiRequest("POST", api.units.create.path, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.units.list.path] });
+      toast({ title: "Satuan Dibuat", description: "Satuan baru berhasil ditambahkan." });
+    },
+    onError: (error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+}
+
+export function useUpdateUnit() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async ({ id, ...data }: { id: number; name?: string; description?: string }) => {
+      const url = buildUrl(api.units.update.path, { id });
+      const res = await apiRequest("PUT", url, data);
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.units.list.path] });
+      toast({ title: "Satuan Diperbarui", description: "Detail satuan berhasil disimpan." });
+    },
+    onError: (error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+}
+
+export function useDeleteUnit() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const url = buildUrl(api.units.delete.path, { id });
+      const res = await fetch(url, { method: "DELETE", credentials: "include" });
+      if (!res.ok) throw new Error("Failed to delete unit");
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.units.list.path] });
+      toast({ title: "Satuan Dihapus", description: "Satuan berhasil dihapus dari sistem." });
+    },
+    onError: (error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
     },
   });
 }

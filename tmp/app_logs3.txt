@@ -1,0 +1,31 @@
+
+up to date, audited 942 packages in 1m
+
+179 packages are looking for funding
+  run `npm fund` for details
+
+20 vulnerabilities (6 low, 2 moderate, 12 high)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues possible (including breaking changes), run:
+  npm audit fix --force
+
+Some issues need review, and may require choosing
+a different dependency.
+
+Run `npm audit` for details.
+
+> rest-express@1.0.0 dev
+> cross-env NODE_ENV=development tsx server/index.ts
+
+[env] File .env berhasil dimuat dan di-sinkronkan.
+[env] DATABASE_URL saat ini: postgresql://postgres:****@db:5432/Qazanaid
+[db] Lingkungan: Docker, Platform: linux
+[db] Memulai koneksi database...
+[db] Database URL: postgresql://postgres:****@db:5432/Qazanaid
+[auth] SESSION_SECRET ditemukan (panjang: 88)
+[server] Registering diagnostic route: /api/diag/db
+[db] Koneksi database berhasil terhubung.
+4:02:53 AM [express] serving on port 5000

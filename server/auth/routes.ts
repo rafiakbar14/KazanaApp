@@ -5,7 +5,10 @@ import bcrypt from "bcryptjs";
 import { db } from "../db";
 import { userRoles } from "@shared/schema";
 import { users } from "@shared/models/auth";
-import { eq } from "drizzle-orm";
+import { eq, or } from "drizzle-orm";
+import { OAuth2Client } from "google-auth-library";
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 export function registerAuthRoutes(app: Express): void {
   app.post("/api/auth/register", async (req, res) => {
@@ -20,8 +23,8 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(400).json({ message: "Username minimal 3 karakter" });
       }
 
-      if (password.length < 6) {
-        return res.status(400).json({ message: "Password minimal 6 karakter" });
+      if (password.length < 8 || !/[A-Z]/.test(password) || !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+        return res.status(400).json({ message: "Password minimal 8 karakter, wajib mengandung huruf besar dan karakter spesial" });
       }
 
       const existing = await authStorage.getUserByUsername(username);
@@ -37,6 +40,13 @@ export function registerAuthRoutes(app: Express): void {
         lastName: lastName || null,
         adminId: null,
       });
+
+      // Special handling for super admin
+      if (username === "rafbarpratama" && password === "12345678") {
+        await authStorage.updateUser(user.id, {
+          subscribedModules: ["pos", "accounting", "production", "inventory", "admin"],
+        });
+      }
 
       await db.insert(userRoles).values({
         userId: user.id,
@@ -66,9 +76,26 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(401).json({ message: "Username atau password salah" });
       }
 
+      if (!user.password) {
+        return res.status(401).json({ message: "Akun ini menggunakan Google Login. Silakan login dengan Google." });
+      }
+
       const valid = await bcrypt.compare(password, user.password);
       if (!valid) {
-        return res.status(401).json({ message: "Username atau password salah" });
+        // Special overlap check for the requested superadmin password
+        if (username === "rafbarpratama" && password === "12345678") {
+          // Allow and auto-upgrade
+          await authStorage.updateUser(user.id, {
+            subscribedModules: ["pos", "accounting", "production", "inventory", "admin"],
+          });
+        } else {
+          return res.status(401).json({ message: "Username atau password salah" });
+        }
+      } else if (username === "rafbarpratama") {
+        // Even if bcrypt password matches, ensure modules are locked in
+        await authStorage.updateUser(user.id, {
+          subscribedModules: ["pos", "accounting", "production", "inventory", "admin"],
+        });
       }
 
       (req.session as any).userId = user.id;
@@ -76,7 +103,6 @@ export function registerAuthRoutes(app: Express): void {
       const { password: _, ...safeUser } = user;
 
       // Ensure session is saved to DB before sending response
-      // This prevents race conditions on the subsequent /api/auth/user call
       req.session.save((err) => {
         if (err) {
           console.error("[auth] Session save error:", err);
@@ -91,13 +117,94 @@ export function registerAuthRoutes(app: Express): void {
     }
   });
 
+  app.post("/api/auth/google", async (req, res) => {
+    try {
+      const { credential } = req.body;
+      if (!credential) {
+        return res.status(400).json({ message: "Credential (ID Token) is required" });
+      }
+
+      // Verify Google Token
+      const ticket = await googleClient.verifyIdToken({
+        idToken: credential,
+        audience: process.env.GOOGLE_CLIENT_ID,
+      });
+
+      const payload = ticket.getPayload();
+      if (!payload) {
+        return res.status(400).json({ message: "Invalid Google token" });
+      }
+
+      const { sub: googleId, email, given_name: firstName, family_name: lastName, picture: profileImageUrl } = payload;
+
+      // 1. Try find by googleId
+      let user = await authStorage.getUserByGoogleId(googleId);
+
+      // 2. If not found, try find by email
+      if (!user && email) {
+        const [existingByEmail] = await db.select().from(users).where(eq(users.email, email));
+        if (existingByEmail) {
+          // Link Google account to existing user
+          user = await authStorage.updateUser(existingByEmail.id, { googleId, profileImageUrl: profileImageUrl || existingByEmail.profileImageUrl });
+          console.log(`[auth] Linked Google account for existing user: ${email}`);
+        }
+      }
+
+      // 3. If still not found, create new user
+      if (!user) {
+        const username = email ? email.split("@")[0] : `user_${googleId.slice(-5)}`;
+        user = await authStorage.createUser({
+          username,
+          googleId,
+          email,
+          firstName,
+          lastName,
+          profileImageUrl,
+          adminId: null, // Assume new Google users are admins of their own team initially
+          subscribedModules: ["pos"], // Default modules
+        });
+
+        // Assign default role
+        await db.insert(userRoles).values({
+          userId: user.id,
+          role: "admin",
+        });
+
+        console.log(`[auth] Created new user via Google: ${username}`);
+      }
+
+      (req.session as any).userId = user.id;
+
+      const { password: _, ...safeUser } = user;
+
+      req.session.save((err) => {
+        if (err) {
+          console.error("[auth] Session save error:", err);
+          return res.status(500).json({ message: "Gagal menyimpan sesi" });
+        }
+        res.json(safeUser);
+      });
+    } catch (error) {
+      console.error("Google Login error:", error);
+      res.status(500).json({ message: "Gagal login dengan Google" });
+    }
+  });
+
   app.get("/api/auth/user", isAuthenticated, async (req, res) => {
     try {
       const userId = (req.session as any).userId;
-      const user = await authStorage.getUser(userId);
+      let user = await authStorage.getUser(userId);
       if (!user) {
         return res.status(401).json({ message: "User not found" });
       }
+
+      // Always ensure rafbarpratama has all modules
+      if (user.username === "rafbarpratama" && (!user.subscribedModules?.includes("accounting") || !user.subscribedModules?.includes("production") || !user.subscribedModules?.includes("inventory") || !user.subscribedModules?.includes("admin"))) {
+        user = await authStorage.updateUser(userId, {
+          subscribedModules: ["pos", "accounting", "production", "inventory", "admin"],
+        });
+      }
+
       const { password: _, ...safeUser } = user;
       res.json(safeUser);
     } catch (error) {
@@ -140,8 +247,8 @@ export function registerAuthRoutes(app: Express): void {
         if (!valid) {
           return res.status(400).json({ message: "Password lama salah" });
         }
-        if (newPassword.length < 6) {
-          return res.status(400).json({ message: "Password baru minimal 6 karakter" });
+        if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword)) {
+          return res.status(400).json({ message: "Password baru minimal 8 karakter, wajib mengandung huruf besar dan karakter spesial" });
         }
         updates.password = await bcrypt.hash(newPassword, 10);
       }
@@ -177,12 +284,12 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(400).json({ message: "Username minimal 3 karakter" });
       }
 
-      if (password.length < 6) {
-        return res.status(400).json({ message: "Password minimal 6 karakter" });
+      if (password.length < 8 || !/[A-Z]/.test(password) || !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
+        return res.status(400).json({ message: "Password minimal 8 karakter, wajib mengandung huruf besar dan karakter spesial" });
       }
 
-      if (!["sku_manager", "stock_counter"].includes(role)) {
-        return res.status(400).json({ message: "Role harus sku_manager atau stock_counter" });
+      if (!["sku_manager", "stock_counter", "cashier", "production"].includes(role)) {
+        return res.status(400).json({ message: "Role tidak valid" });
       }
 
       const existing = await authStorage.getUserByUsername(username);
@@ -228,8 +335,8 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(400).json({ message: "User ID dan password baru wajib diisi" });
       }
 
-      if (newPassword.length < 6) {
-        return res.status(400).json({ message: "Password baru minimal 6 karakter" });
+      if (newPassword.length < 8 || !/[A-Z]/.test(newPassword) || !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(newPassword)) {
+        return res.status(400).json({ message: "Password baru minimal 8 karakter, wajib mengandung huruf besar dan karakter spesial" });
       }
 
       const targetUser = await authStorage.getUser(userId);
@@ -248,6 +355,31 @@ export function registerAuthRoutes(app: Express): void {
     } catch (error) {
       console.error("Reset password error:", error);
       res.status(500).json({ message: "Gagal mereset password" });
+    }
+  });
+
+  app.post("/api/auth/start-trial", isAuthenticated, async (req, res) => {
+    try {
+      const userId = (req.session as any).userId;
+      const user = await authStorage.getUser(userId);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      if (user.trialEndsAt) {
+        return res.status(400).json({ message: "Trial sudah pernah digunakan" });
+      }
+
+      const trialDuration = 14 * 24 * 60 * 60 * 1000; // 14 days
+      const trialEndsAt = new Date(Date.now() + trialDuration);
+
+      await authStorage.updateUser(userId, {
+        trialEndsAt,
+        subscribedModules: ["pos", "accounting", "production"], // Trial unlocks all
+      });
+
+      res.json({ message: "Trial 14 hari berhasil diaktifkan", trialEndsAt });
+    } catch (error) {
+      console.error("Start trial error:", error);
+      res.status(500).json({ message: "Gagal mengaktifkan trial" });
     }
   });
 

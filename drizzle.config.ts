@@ -6,10 +6,10 @@ if (!databaseUrl) {
   throw new Error("DATABASE_URL, ensure the database is provisioned");
 }
 
-// Auto-fallback for local development: if hostname is "db" but we're not inside Docker/Production
-if (process.env.NODE_ENV !== 'production' && databaseUrl.includes('@db:')) {
-  databaseUrl = databaseUrl.replace('@db:', '@localhost:');
-}
+// Auto-fallback for local development (outside Docker): 
+// If you run drizzle-kit from host, it needs localhost. 
+// If you run from inside docker-exec, it needs 'db'.
+// We'll trust the DATABASE_URL from environment.
 
 export default defineConfig({
   out: "./migrations",

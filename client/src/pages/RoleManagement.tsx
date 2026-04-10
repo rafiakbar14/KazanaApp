@@ -27,16 +27,18 @@ const roleLabels: Record<string, string> = {
   admin: "Admin",
   sku_manager: "SKU Manager",
   stock_counter: "Stock Counter",
-  stock_counter_toko: "Stock Counter Toko",
-  stock_counter_gudang: "Stock Counter Gudang",
+  cashier: "Cashier / Kasir",
+  production: "Production / Dapur",
+  driver: "Driver / Tim Kirim",
 };
 
 const roleBadgeColors: Record<string, string> = {
   admin: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
   sku_manager: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
   stock_counter: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-  stock_counter_toko: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-  stock_counter_gudang: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
+  cashier: "bg-pink-100 text-pink-700 dark:bg-pink-900/30 dark:text-pink-400",
+  production: "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+  driver: "bg-slate-100 text-slate-700 dark:bg-slate-900/30 dark:text-slate-400",
 };
 
 export default function RoleManagement() {
@@ -190,13 +192,17 @@ export default function RoleManagement() {
                       <SelectContent className="bg-white border border-border shadow-xl">
                         <SelectItem value="sku_manager">SKU Manager</SelectItem>
                         <SelectItem value="stock_counter">Stock Counter</SelectItem>
-                        <SelectItem value="stock_counter_toko">Stock Counter Toko</SelectItem>
-                        <SelectItem value="stock_counter_gudang">Stock Counter Gudang</SelectItem>
+                        <SelectItem value="cashier">Cashier</SelectItem>
+                        <SelectItem value="production">Production</SelectItem>
+                        <SelectItem value="driver">Driver</SelectItem>
                       </SelectContent>
                     </Select>
                   </td>
                   <td className="px-6 py-4">
-                    <ResetPasswordButton userId={user.userId} userName={user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : user.username || "User"} />
+                    <div className="flex items-center gap-2">
+                      <SetPinButton userId={user.userId} userName={user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : user.username || "User"} />
+                      <ResetPasswordButton userId={user.userId} userName={user.firstName && user.lastName ? `${user.firstName} ${user.lastName}` : user.username || "User"} />
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -218,8 +224,9 @@ export default function RoleManagement() {
           <p><strong className="text-foreground">Admin (Owner)</strong> - Akses penuh: kelola produk, sesi, dan user tim</p>
           <p><strong className="text-foreground">SKU Manager</strong> - Bisa membuat, edit, dan hapus produk/SKU. Tidak bisa kelola sesi atau role</p>
           <p><strong className="text-foreground">Stock Counter</strong> - Bisa membuat dan mengisi sesi stock opname untuk Toko dan Gudang</p>
-          <p><strong className="text-foreground">Stock Counter Toko</strong> - Hanya bisa stock opname untuk lokasi Toko</p>
-          <p><strong className="text-foreground">Stock Counter Gudang</strong> - Hanya bisa stock opname untuk lokasi Gudang</p>
+          <p><strong className="text-foreground">Cashier</strong> - Petugas penjualan (Akses modul POS Kasir, buka/tutup shift)</p>
+          <p><strong className="text-foreground">Production</strong> - Tim dapur/pabrik (Akses modul daftar tugas produksi & perakitan)</p>
+          <p><strong className="text-foreground">Driver</strong> - Tim pengiriman (Akses modul logistik & transfer barang)</p>
         </div>
       </div>
     </div>
@@ -432,8 +439,9 @@ function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
               <SelectContent className="bg-white border border-border shadow-xl">
                 <SelectItem value="sku_manager">SKU Manager</SelectItem>
                 <SelectItem value="stock_counter">Stock Counter</SelectItem>
-                <SelectItem value="stock_counter_toko">Stock Counter Toko</SelectItem>
-                <SelectItem value="stock_counter_gudang">Stock Counter Gudang</SelectItem>
+                <SelectItem value="cashier">Cashier</SelectItem>
+                <SelectItem value="production">Production</SelectItem>
+                <SelectItem value="driver">Driver</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -443,6 +451,93 @@ function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
             <Button type="submit" disabled={createUser.isPending} data-testid="button-submit-new-user">
               {createUser.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Buat User
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function SetPinButton({ userId, userName }: { userId: string; userName: string }) {
+  const { toast } = useToast();
+  const [open, setOpen] = useState(false);
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+
+  const updatePin = useMutation({
+    mutationFn: async (data: { userId: string; pin: string }) => {
+      const res = await fetch("/api/admin/user/pin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.message || "Gagal mengatur PIN");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "PIN Diatur", description: `PIN POS untuk ${userName} berhasil diperbarui.` });
+      setOpen(false);
+      setPin("");
+      setError("");
+    },
+    onError: (err) => {
+      setError(err.message);
+    },
+  });
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (pin.length !== 6) {
+      setError("PIN harus 6 digit angka");
+      return;
+    }
+    setError("");
+    updatePin.mutate({ userId, pin });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) { setPin(""); setError(""); } }}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="border-primary/20 hover:border-primary/50 text-primary" data-testid={`button-set-pin-${userId}`}>
+          <Shield className="w-4 h-4 mr-1.5" />
+          Set PIN POS
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="sm:max-w-[400px]">
+        <DialogHeader>
+          <DialogTitle>Atur PIN POS - {userName}</DialogTitle>
+        </DialogHeader>
+        <form onSubmit={handleSubmit} className="space-y-4 pt-2">
+          {error && (
+            <div className="flex items-center gap-2 p-3 rounded-md bg-destructive/10 text-destructive text-sm">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              {error}
+            </div>
+          )}
+          <div>
+            <label className="text-sm font-medium text-foreground mb-1.5 block">PIN Baru (6 Digit Angka)</label>
+            <Input
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={6}
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, ""))}
+              placeholder="Masukkan 6 digit angka"
+              required
+              data-testid="input-set-pin"
+            />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button type="button" variant="outline" onClick={() => setOpen(false)}>Batal</Button>
+            <Button type="submit" disabled={updatePin.isPending} data-testid="button-submit-pin">
+              {updatePin.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Simpan PIN
             </Button>
           </div>
         </form>

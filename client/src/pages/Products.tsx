@@ -494,8 +494,10 @@ export default function Products() {
               </SelectTrigger>
               <SelectContent className="bg-white border border-border shadow-xl rounded-xl">
                 <SelectItem value="all">Semua Kategori</SelectItem>
-                {categories?.map((cat: string) => (
-                  <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                {categories?.map((cat: any) => (
+                  <SelectItem key={typeof cat === 'string' ? cat : cat.id} value={typeof cat === 'string' ? cat : cat.name}>
+                    {typeof cat === 'string' ? cat : cat.name}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -529,7 +531,7 @@ export default function Products() {
       <CategoryPriorityDialog
         open={categoryPriorityOpen}
         onOpenChange={setCategoryPriorityOpen}
-        categories={categories ?? []}
+        categories={(categories as any) ?? []}
       />
 
 
@@ -592,8 +594,11 @@ export default function Products() {
                     <th className="px-4 py-3 font-medium text-muted-foreground w-32">SKU</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground">Nama Produk</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground w-32">Kategori</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground w-32 text-center uppercase text-[10px] tracking-widest">Tipe</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground w-28">Lokasi</th>
                     <th className="px-4 py-3 font-medium text-muted-foreground text-right w-24">Stok</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground text-right w-24 uppercase text-[10px] tracking-widest">Min</th>
+                    <th className="px-4 py-3 font-medium text-muted-foreground text-right w-32">Harga Jual</th>
                     {canManageSku && (
                       <th className="px-4 py-3 font-medium text-muted-foreground text-right w-36">Aksi</th>
                     )}
@@ -766,6 +771,17 @@ const ProductRow = memo(({
         </div>
       </td>
       <td className="px-4 py-3 text-muted-foreground">{product.category || "-"}</td>
+      <td className="px-4 py-3 text-center">
+        <Badge variant="outline" className={cn(
+          "text-[10px] uppercase font-bold",
+          product.productType === "raw_material" ? "border-amber-200 text-amber-700 bg-amber-50" :
+          product.productType === "component" ? "border-indigo-200 text-indigo-700 bg-indigo-50" :
+          "border-primary/20 text-primary bg-primary/5"
+        )}>
+          {product.productType === "raw_material" ? "Mentah" :
+           product.productType === "component" ? "Komponen" : "Jadi"}
+        </Badge>
+      </td>
       <td className="px-4 py-3">
         <Badge variant={product.locationType === "gudang" ? "outline" : "secondary"} data-testid={`badge-location-${product.id}`}>
           {product.locationType === "gudang" ? (
@@ -776,9 +792,16 @@ const ProductRow = memo(({
         </Badge>
       </td>
       <td className="px-4 py-3 text-right">
-        <span className={product.currentStock < 10 ? "text-orange-600 font-bold" : "text-foreground"}>
+        <span className={product.currentStock <= (product.minStock || 0) ? "text-red-600 font-black flex items-center justify-end gap-1" : "text-foreground"}>
+          {product.currentStock <= (product.minStock || 0) && <AlertTriangle className="w-3 h-3" />}
           {product.currentStock}
         </span>
+      </td>
+      <td className="px-4 py-3 text-right text-muted-foreground font-mono text-[10px]">
+        {product.minStock || 0}
+      </td>
+      <td className="px-4 py-3 text-right font-bold text-primary">
+        {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(product.sellingPrice || 0)}
       </td>
       {canManageSku && (
         <td className="px-4 py-3 text-right">
@@ -827,11 +850,17 @@ function formatUnitDisplay(units: ProductUnit[]): string {
 function EditProductRow({ product, onCancel, onSaved }: { product: Product; onCancel: () => void; onSaved: () => void }) {
   const [name, setName] = useState(product.name);
   const [currentStock, setCurrentStock] = useState(product.currentStock);
+  const [unitCost, setUnitCost] = useState(product.unitCost || 0);
+  const [sellingPrice, setSellingPrice] = useState(product.sellingPrice || 0);
+  const [productType, setProductType] = useState<"finished_good" | "raw_material" | "component">(product.productType || "finished_good");
+  const [minStock, setMinStock] = useState(product.minStock || 0);
+  const [isTaxable, setIsTaxable] = useState(product.isTaxable ?? 1);
+  const [taxRate, setTaxRate] = useState(product.taxRate || 11.0);
   const updateProduct = useUpdateProduct();
 
   const handleSave = () => {
     updateProduct.mutate(
-      { id: product.id, name, currentStock },
+      { id: product.id, name, currentStock, unitCost, sellingPrice, productType: productType as any, minStock, isTaxable, taxRate },
       { onSuccess: onSaved }
     );
   };
@@ -853,6 +882,18 @@ function EditProductRow({ product, onCancel, onSaved }: { product: Product; onCa
         />
       </td>
       <td className="px-4 py-3 text-muted-foreground">{product.category || "-"}</td>
+      <td className="px-4 py-3 text-center">
+        <Select value={productType} onValueChange={(v) => setProductType(v as any)}>
+          <SelectTrigger className="w-24 h-8 text-[10px] uppercase font-bold bg-white">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent className="bg-white">
+            <SelectItem value="finished_good">Jadi</SelectItem>
+            <SelectItem value="raw_material">Mentah</SelectItem>
+            <SelectItem value="component">Komponen</SelectItem>
+          </SelectContent>
+        </Select>
+      </td>
       <td className="px-4 py-3">
         <Badge variant={product.locationType === "gudang" ? "outline" : "secondary"}>
           {product.locationType === "gudang" ? "Gudang" : "Toko"}
@@ -863,9 +904,46 @@ function EditProductRow({ product, onCancel, onSaved }: { product: Product; onCa
           type="number"
           value={currentStock}
           onChange={(e) => setCurrentStock(parseInt(e.target.value) || 0)}
-          className="w-24 ml-auto text-right"
+          className="w-20 ml-auto text-right"
           data-testid={`input-edit-stock-${product.id}`}
         />
+      </td>
+      <td className="px-4 py-3 text-right">
+        <Input
+          type="number"
+          value={minStock}
+          onChange={(e) => setMinStock(parseInt(e.target.value) || 0)}
+          className="w-16 ml-auto text-right text-[10px] h-7"
+          data-testid={`input-edit-min-stock-${product.id}`}
+        />
+      </td>
+      <td className="px-4 py-3 text-right">
+        <div className="flex flex-col gap-1 items-end">
+          <Input
+            type="number"
+            value={unitCost}
+            onChange={(e) => setUnitCost(parseFloat(e.target.value) || 0)}
+            className="w-24 text-right text-[10px] h-7"
+            placeholder="Modal"
+          />
+          <Input
+            type="number"
+            value={sellingPrice}
+            onChange={(e) => setSellingPrice(parseFloat(e.target.value) || 0)}
+            className="w-24 text-right font-bold text-primary h-8"
+            placeholder="Jual"
+          />
+          <div className="flex items-center gap-1 mt-1">
+            <span className="text-[8px] uppercase font-bold text-muted-foreground">Tax</span>
+            <Input
+              type="number"
+              step="0.1"
+              value={taxRate}
+              onChange={(e) => setTaxRate(parseFloat(e.target.value) || 0)}
+              className="w-10 text-[8px] h-5 px-1 text-right"
+            />
+          </div>
+        </div>
       </td>
       <td className="px-4 py-3 text-right">
         <div className="flex items-center justify-end gap-1">
@@ -915,6 +993,12 @@ function CreateProductDialog({ open, onOpenChange }: { open: boolean; onOpenChan
       locationType: "toko",
       subCategory: "",
       productCode: "",
+      unitCost: 0,
+      sellingPrice: 0,
+      productType: "finished_good",
+      minStock: 0,
+      isTaxable: 1,
+      taxRate: 11.0,
     },
   });
 
@@ -1065,6 +1149,47 @@ function CreateProductDialog({ open, onOpenChange }: { open: boolean; onOpenChan
                 </FormItem>
               )}
             />
+
+            <div className="grid grid-cols-2 gap-4">
+              <FormField
+                control={form.control}
+                name="unitCost"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Harga Modal (HPP)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        {...field}
+                        value={field.value ?? 0}
+                        onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                        data-testid="input-unit-cost"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="sellingPrice"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Harga Jual</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="number"
+                        {...field}
+                        value={field.value ?? 0}
+                        onChange={(e) => field.onChange(parseFloat(e.target.value) || 0)}
+                        data-testid="input-selling-price"
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
 
             <div className="grid grid-cols-2 gap-4">
               <FormField
@@ -1691,9 +1816,20 @@ const MobileProductCard = memo(({
             <span className="text-[10px] font-mono font-bold text-muted-foreground tracking-wider uppercase">
               {product.locationType === "gudang" && product.productCode ? product.productCode : product.sku}
             </span>
-            <Badge variant={product.locationType === "gudang" ? "outline" : "secondary"} className="text-[9px] h-4 px-1 whitespace-nowrap">
-              {product.locationType === "gudang" ? "GUDANG" : "TOKO"}
-            </Badge>
+            <div className="flex items-center gap-1">
+              <Badge variant={product.locationType === "gudang" ? "outline" : "secondary"} className="text-[9px] h-4 px-1 whitespace-nowrap">
+                {product.locationType === "gudang" ? "GUDANG" : "TOKO"}
+              </Badge>
+              <Badge variant="outline" className={cn(
+                "text-[9px] h-4 px-1 whitespace-nowrap uppercase font-bold",
+                product.productType === "raw_material" ? "border-amber-200 text-amber-700 bg-amber-50" :
+                product.productType === "component" ? "border-indigo-200 text-indigo-700 bg-indigo-50" :
+                "border-primary/20 text-primary bg-primary/5"
+              )}>
+                {product.productType === "raw_material" ? "Mentah" :
+                 product.productType === "component" ? "Komponen" : "Jadi"}
+              </Badge>
+            </div>
           </div>
           <h3 className="font-bold text-foreground leading-tight mt-1 line-clamp-2">{product.name}</h3>
           <div className="flex items-center gap-2 mt-2">
@@ -1706,10 +1842,19 @@ const MobileProductCard = memo(({
 
       <div className="flex items-center justify-between mt-4 pt-4 border-t border-dashed border-border/50">
         <div className="flex flex-col">
-          <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Stok Saat Ini</span>
-          <span className={cn("text-lg font-bold", product.currentStock < 10 ? "text-orange-600" : "text-foreground")}>
-            {product.currentStock.toLocaleString("id-ID")}
-          </span>
+          <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">Stok / Harga</span>
+          <div className="flex items-center gap-2">
+            <span className={cn(
+              "text-lg font-bold",
+              product.currentStock <= (product.minStock || 0) ? "text-red-600 active-pulse" : "text-foreground"
+            )}>
+              {product.currentStock.toLocaleString("id-ID")}
+              {product.currentStock <= (product.minStock || 0) && <span className="ml-1 text-[10px] font-black">(LOW)</span>}
+            </span>
+            <span className="text-primary font-bold">
+              {new Intl.NumberFormat("id-ID", { style: "currency", currency: "IDR", maximumFractionDigits: 0 }).format(product.sellingPrice || 0)}
+            </span>
+          </div>
         </div>
 
         <div className="flex gap-2">
@@ -1764,11 +1909,17 @@ function DeleteProductButton({ id, name }: { id: number; name: string }) {
 function MobileEditProductCard({ product, onCancel, onSaved }: { product: Product; onCancel: () => void; onSaved: () => void }) {
   const [name, setName] = useState(product.name);
   const [currentStock, setCurrentStock] = useState(product.currentStock);
+  const [unitCost, setUnitCost] = useState(product.unitCost || 0);
+  const [sellingPrice, setSellingPrice] = useState(product.sellingPrice || 0);
+  const [productType, setProductType] = useState<"finished_good" | "raw_material" | "component">(product.productType || "finished_good");
+  const [minStock, setMinStock] = useState(product.minStock || 0);
+  const [isTaxable, setIsTaxable] = useState(product.isTaxable ?? 1);
+  const [taxRate, setTaxRate] = useState(product.taxRate || 11.0);
   const updateProduct = useUpdateProduct();
 
   const handleSave = () => {
     updateProduct.mutate(
-      { id: product.id, name, currentStock },
+      { id: product.id, name, currentStock, unitCost, sellingPrice, productType: productType as any, minStock, isTaxable, taxRate },
       { onSuccess: onSaved }
     );
   };
@@ -1789,6 +1940,77 @@ function MobileEditProductCard({ product, onCancel, onSaved }: { product: Produc
             className="bg-white rounded-xl border-primary/10"
             placeholder="Nama produk..."
           />
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-muted-foreground uppercase px-1">Harga Modal</label>
+            <Input
+              type="number"
+              value={unitCost}
+              onChange={(e) => setUnitCost(parseFloat(e.target.value) || 0)}
+              className="bg-white rounded-xl border-primary/10 text-xs"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-muted-foreground uppercase px-1">Harga Jual</label>
+            <Input
+              type="number"
+              value={sellingPrice}
+              onChange={(e) => setSellingPrice(parseFloat(e.target.value) || 0)}
+              className="bg-white rounded-xl border-primary/10 font-bold text-primary text-xs"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-muted-foreground uppercase px-1">Tipe Produk</label>
+            <Select value={productType} onValueChange={(v) => setProductType(v as any)}>
+              <SelectTrigger className="bg-white rounded-xl border-primary/10 h-9 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-white">
+                <SelectItem value="finished_good">Jadi</SelectItem>
+                <SelectItem value="raw_material">Mentah</SelectItem>
+                <SelectItem value="component">Komponen</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-muted-foreground uppercase px-1">Stok Min</label>
+            <Input
+              type="number"
+              value={minStock}
+              onChange={(e) => setMinStock(parseInt(e.target.value) || 0)}
+              className="bg-white rounded-xl border-primary/10 text-xs h-9"
+            />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-muted-foreground uppercase px-1">Pajak</label>
+            <Select value={String(isTaxable)} onValueChange={(v) => setIsTaxable(parseInt(v))}>
+              <SelectTrigger className="bg-white rounded-xl border-primary/10 h-8 text-[10px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-white">
+                <SelectItem value="1">Kena Pajak</SelectItem>
+                <SelectItem value="0">Tidak</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-[10px] font-bold text-muted-foreground uppercase px-1">Tarif (%)</label>
+            <Input
+              type="number"
+              step="0.1"
+              value={taxRate}
+              onChange={(e) => setTaxRate(parseFloat(e.target.value) || 0)}
+              className="bg-white rounded-xl border-primary/10 text-xs h-8"
+            />
+          </div>
         </div>
 
         <div className="space-y-1.5">

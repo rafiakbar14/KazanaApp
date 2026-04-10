@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Switch, Route } from "wouter";
+import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -12,57 +12,168 @@ import Products from "@/pages/Products";
 import Sessions from "@/pages/Sessions";
 import SessionDetail from "@/pages/SessionDetail";
 import RoleManagement from "@/pages/RoleManagement";
+import InboundSessions from "@/pages/InboundSessions";
+import InboundDetail from "@/pages/InboundDetail";
+import OutboundSessions from "@/pages/OutboundSessions";
+import OutboundDetail from "@/pages/OutboundDetail";
 import Profile from "@/pages/Profile";
 import StaffManagement from "@/pages/StaffManagement";
 import Announcements from "@/pages/Announcements";
 import FeedbackPage from "@/pages/FeedbackPage";
 import MotivationPage from "@/pages/MotivationPage";
+import BOMList from "@/pages/BOMList";
+import BOMDetail from "@/pages/BOMDetail";
+import AssemblySessions from "@/pages/AssemblySessions";
+import ProductionAI from "@/pages/ProductionAI";
+import POS from "@/pages/POS";
+import Accounts from "@/pages/accounting/Accounts";
+import Journal from "@/pages/accounting/Journal";
+import Assets from "@/pages/accounting/Assets";
+import Reports from "@/pages/accounting/Reports";
+import Customers from "@/pages/Customers";
+import Invoices from "@/pages/Invoices";
+import NewInvoice from "@/pages/NewInvoice";
+import ReportsExport from "@/pages/ReportsExport";
+import TerminalManagement from "@/pages/TerminalManagement";
+import PromotionManagement from "@/pages/PromotionManagement";
+import POSSessions from "@/pages/POSSessions";
+import MasterData from "@/pages/MasterData";
+import Categories from "@/pages/Categories";
+import Units from "@/pages/Units";
+import BarcodeGenerator from "@/pages/BarcodeGenerator";
+import MasterImportExport from "@/pages/MasterImportExport";
+import SubscriptionPage from "@/pages/Subscription";
 import NotFound from "@/pages/not-found";
 import { BackgroundUploadProvider } from "@/components/BackgroundUpload";
-import { Loader2, Package, AlertCircle, Info, Megaphone, ChevronLeft, ChevronRight, Shield, Lock } from "lucide-react";
+import { POSProvider } from "@/hooks/use-pos";
+import { Loader2, Package, AlertCircle, Info, Megaphone, ChevronLeft, ChevronRight, Monitor, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import type { Announcement } from "@shared/schema";
+import { useRole } from "@/hooks/use-role";
 
 function LoginPage() {
   const { login, register, loginError, registerError, isLoggingIn, isRegistering } = useAuth();
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [location, setLocation] = useLocation();
+  const queryParams = new URLSearchParams(window.location.search);
+  const initialMode = (queryParams.get("mode") as "admin" | "register") || "choice";
+
+  const [authType, setAuthType] = useState<"choice" | "admin" | "register">(initialMode as any);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [showForgotInfo, setShowForgotInfo] = useState(false);
 
+  useEffect(() => {
+    /* global google */
+    if (authType === "choice") return;
+
+    let checkInterval: NodeJS.Timeout;
+
+    const tryInitGoogle = () => {
+      const btnContainer = document.getElementById("googleBtn");
+      if (window.google && btnContainer) {
+        window.google.accounts.id.initialize({
+          client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID || "PROVIDE_GOOGLE_CLIENT_ID",
+          callback: async (response: any) => {
+            try {
+              const res = await fetch("/api/auth/google", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ credential: response.credential }),
+              });
+              if (res.ok) {
+                const user = await res.json();
+                queryClient.setQueryData(["/api/auth/user"], user);
+                
+                const qParams = new URLSearchParams(window.location.search);
+                const intent = qParams.get("intent");
+                const moduleToBuy = qParams.get("module");
+                
+                if (intent === "buy" && moduleToBuy) {
+                  setLocation(`/subscription?module=${moduleToBuy}&autoCheckout=true`);
+                } else {
+                  setLocation("/");
+                }
+              } else {
+                const err = await res.json();
+                console.error("Google login failed:", err.message);
+              }
+            } catch (e) {
+              console.error("Google login error:", e);
+            }
+          },
+        });
+
+        window.google.accounts.id.renderButton(btnContainer, {
+          theme: "filled_black",
+          size: "large",
+          width: 320,
+          shape: "pill",
+          text: "signin_with"
+        });
+
+        if (checkInterval) clearInterval(checkInterval);
+        return true;
+      }
+      return false;
+    };
+
+    if (!tryInitGoogle()) {
+      checkInterval = setInterval(tryInitGoogle, 500);
+    }
+
+    return () => {
+      if (checkInterval) clearInterval(checkInterval);
+    };
+  }, [setLocation, authType]);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (mode === "login") {
-      await login({ username, password });
-    } else {
-      await register({ username, password, firstName, lastName });
+    try {
+      if (authType === "admin" || authType === "choice") {
+        await login({ username, password });
+      } else {
+        await register({ username, password, firstName, lastName });
+      }
+
+      const qParams = new URLSearchParams(window.location.search);
+      const intent = qParams.get("intent");
+      const moduleToBuy = qParams.get("module");
+      
+      if (intent === "buy" && moduleToBuy) {
+        setLocation(`/subscription?module=${moduleToBuy}&autoCheckout=true`);
+      } else if (authType === "register") {
+        setLocation("/subscription");
+      } else {
+        setLocation("/");
+      }
+    } catch (err) {
+      // errors are handled by useAuth hook
     }
   };
 
-  const error = mode === "login" ? loginError : registerError;
-  const isPending = mode === "login" ? isLoggingIn : isRegistering;
+  const error = authType === "register" ? registerError : loginError;
+  const isPending = authType === "register" ? isRegistering : isLoggingIn;
 
   return (
-    <div className="min-h-screen grid grid-cols-1 lg:grid-cols-2 bg-[#0044CC] overflow-hidden">
+    <div className="min-h-screen grid grid-cols-1 lg:grid-cols-2 bg-[#0044CC] overflow-hidden font-sans">
       {/* Left Side: Branding & Trust */}
       <div className="hidden lg:flex flex-col justify-between p-16 bg-gradient-to-br from-[#0066FF] to-[#0044CC] relative">
         <div className="z-10 flex items-center gap-3">
           <div className="bg-white/10 p-2 rounded-xl backdrop-blur-md">
             <Package className="w-8 h-8 text-white" />
           </div>
-          <span className="text-3xl font-display font-bold text-white tracking-tight">Kazana</span>
+          <span className="text-3xl font-bold text-white tracking-tight">Stockify ERP</span>
         </div>
 
         <div className="z-10 max-w-md">
-          <h2 className="text-4xl font-display font-bold text-white mb-4">Professional Inventory Management</h2>
-          <p className="text-blue-100/70 text-lg leading-relaxed">
-            Everything you need to track, manage, and optimize your stock in one secure place.
+          <h2 className="text-5xl font-bold text-white mb-6 leading-tight">Sistem Manajemen Bisnis Profesional</h2>
+          <p className="text-blue-100/70 text-lg leading-relaxed font-medium">
+            Kelola stok, gudang, dan penjualan dalam satu platform terpadu yang aman dan cerdas.
           </p>
         </div>
 
@@ -71,145 +182,183 @@ function LoginPage() {
         <div className="absolute bottom-1/4 -right-10 w-60 h-60 bg-indigo-500/10 rounded-full blur-[100px]" />
       </div>
 
-      {/* Right Side: Login Form */}
-      <div className="flex flex-col items-center justify-center p-6 lg:p-12 bg-[#0044CC] lg:bg-gradient-to-br lg:from-[#0055EE] lg:to-[#0033BB] relative">
-        <div className="w-full max-w-md z-10 animate-enter">
-          <div className="bg-white/10 backdrop-blur-2xl border border-white/20 rounded-[2.5rem] p-8 lg:p-12 shadow-[0_20px_50px_rgba(0,0,0,0.3)]">
-            <div className="mb-10 text-center lg:text-left">
-              <h2 className="text-3xl lg:text-4xl font-bold text-white mb-2">
-                {mode === "login" ? "Secure Client Login" : "Create Account"}
-              </h2>
-              <p className="text-blue-200/60 font-medium">Please enter your credentials to proceed</p>
+      {/* Right Side: Login Content */}
+      <div className="flex flex-col items-center justify-center p-6 lg:p-12 relative overflow-y-auto">
+        <div className="w-full max-w-md z-10">
+          {authType === "choice" ? (
+            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+              <div className="text-center mb-10">
+                <h1 className="text-4xl font-black text-white mb-3 tracking-tighter">SELAMAT DATANG</h1>
+                <p className="text-blue-200/60 font-medium">Pilih akses sistem yang Anda butuhkan</p>
+              </div>
+
+              <div className="grid grid-cols-1 gap-6">
+                <button
+                  onClick={() => setAuthType("admin")}
+                  className="group relative bg-white/10 hover:bg-white/15 backdrop-blur-xl border border-white/20 rounded-[2rem] p-8 text-left transition-all hover:scale-[1.02] active:scale-95 shadow-2xl"
+                >
+                  <div className="flex items-center gap-6">
+                    <div className="w-16 h-16 bg-blue-500 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">
+                      <Monitor className="w-8 h-8 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-white">Dashboard Admin</h3>
+                      <p className="text-blue-200/50 text-sm font-medium">Kelola Stok, User, & Laporan</p>
+                    </div>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => setLocation("/pos")}
+                  className="group relative bg-white/10 hover:bg-white/15 backdrop-blur-xl border border-white/20 rounded-[2rem] p-8 text-left transition-all hover:scale-[1.02] active:scale-95 shadow-2xl"
+                >
+                  <div className="flex items-center gap-6">
+                    <div className="w-16 h-16 bg-emerald-500 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/20 group-hover:scale-110 transition-transform">
+                      <ShoppingCart className="w-8 h-8 text-white" />
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-bold text-white">Terminal Kasir (POS)</h3>
+                      <p className="text-emerald-200/50 text-sm font-medium">Input Penjualan & Print Struk</p>
+                    </div>
+                  </div>
+                </button>
+              </div>
+
+              <p className="text-center text-white/20 text-xs font-mono tracking-widest uppercase pt-8">Powered by Kazana AI Engine</p>
             </div>
-
-            <form onSubmit={handleSubmit} className="space-y-6">
-              {error && (
-                <div className="flex items-center gap-2 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-200 text-sm" data-testid="text-auth-error">
-                  <AlertCircle className="w-4 h-4 shrink-0" />
-                  {error.message}
-                </div>
-              )}
-
-              {mode === "register" && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-blue-200/80 uppercase tracking-wider ml-1">First Name</label>
-                    <Input
-                      value={firstName}
-                      onChange={(e) => setFirstName(e.target.value)}
-                      placeholder="John"
-                      className="bg-white/5 border-white/10 text-white placeholder:text-white/30 h-12 focus:ring-blue-500/50"
-                      data-testid="input-first-name"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-white/70 uppercase tracking-wider ml-1">Last Name</label>
-                    <Input
-                      value={lastName}
-                      onChange={(e) => setLastName(e.target.value)}
-                      placeholder="Doe"
-                      className="bg-white/5 border-white/10 text-white placeholder:text-white/30 h-12 focus:ring-blue-500/50"
-                      data-testid="input-last-name"
-                    />
-                  </div>
-                </div>
-              )}
-
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-white/70 uppercase tracking-wider ml-1">Username</label>
-                <Input
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  placeholder="Enter your username"
-                  className="bg-white/5 border-white/10 text-white h-12 focus:ring-blue-500/50 placeholder:text-white/30"
-                  autoComplete="username"
-                  required
-                  data-testid="input-username"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <div className="flex justify-between items-center ml-1">
-                  <label className="text-xs font-bold text-white/70 uppercase tracking-wider">Password</label>
-                  {mode === "login" && (
-                    <button
-                      type="button"
-                      className="text-xs font-medium text-blue-200 hover:text-white transition-colors"
-                      onClick={() => setShowForgotInfo(true)}
-                    >
-                      Forgot?
-                    </button>
-                  )}
-                </div>
-                <Input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="Password"
-                  className="bg-white/5 border-white/10 text-white h-12 focus:ring-blue-500/50 placeholder:text-white/30"
-                  autoComplete={mode === "login" ? "current-password" : "new-password"}
-                  required
-                  data-testid="input-password"
-                />
-              </div>
-
-              <div className="flex items-center gap-2 px-1">
-                <input
-                  type="checkbox"
-                  id="remember"
-                  className="w-4 h-4 rounded border-white/20 bg-blue-900 text-blue-600 focus:ring-blue-500/50 ring-offset-blue-900"
-                />
-                <label htmlFor="remember" className="text-sm text-white/50 font-medium cursor-pointer">Remember Me</label>
-              </div>
-
-              <Button
-                type="submit"
-                className="w-full h-12 bg-blue-600 hover:bg-blue-500 text-white font-bold text-lg rounded-xl shadow-lg shadow-blue-900/40 transition-all active:scale-95"
-                disabled={isPending}
-                data-testid="button-submit-auth"
+          ) : (
+            <div className="bg-white/10 backdrop-blur-2xl border border-white/20 rounded-[2.5rem] p-8 lg:p-12 shadow-[0_20px_50px_rgba(0,0,0,0.3)] animate-in zoom-in-95 duration-500">
+              <button
+                onClick={() => setAuthType("choice")}
+                className="mb-8 flex items-center text-blue-200/60 hover:text-white transition-colors text-sm font-bold uppercase tracking-widest gap-2"
               >
-                {isPending && <Loader2 className="w-5 h-5 mr-3 animate-spin" />}
-                {mode === "login" ? "Login" : "Sign Up"}
-              </Button>
+                <ChevronLeft className="w-4 h-4" /> Kembali
+              </button>
 
-              <div className="text-center pt-4">
-                <p className="text-sm text-blue-200/60 font-medium">
-                  {mode === "login" ? (
-                    <>
-                      Not a member yet?{" "}
-                      <button
-                        type="button"
-                        className="text-white hover:underline font-bold"
-                        onClick={() => { setMode("register"); setUsername(""); setPassword(""); }}
-                        data-testid="button-switch-register"
-                      >
-                        Create a New Account
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      Already have an account?{" "}
-                      <button
-                        type="button"
-                        className="text-white hover:underline font-bold"
-                        onClick={() => { setMode("login"); setUsername(""); setPassword(""); }}
-                        data-testid="button-switch-login"
-                      >
-                        Login Here
-                      </button>
-                    </>
-                  )}
-                </p>
+              <div className="mb-10 text-center lg:text-left">
+                <h2 className="text-3xl lg:text-4xl font-black text-white mb-2 tracking-tighter uppercase">
+                  {authType === "admin" ? "Admin Login" : "Daftar Akun"}
+                </h2>
+                <p className="text-blue-200/60 font-medium">Masukkan kredensial Anda untuk masuk</p>
               </div>
-            </form>
-          </div>
 
-          <div className="mt-8 text-center lg:hidden">
-            <div className="flex items-center justify-center gap-3">
-              <Package className="w-6 h-6 text-white/40" />
-              <span className="text-xl font-display font-bold text-white/40">Kazana</span>
+              <form onSubmit={handleSubmit} className="space-y-6">
+                {error && (
+                  <div className="flex items-center gap-2 p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-200 text-sm">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    {error.message}
+                  </div>
+                )}
+
+                {authType === "register" && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-blue-200/80 uppercase tracking-wider ml-1">Nama Depan</label>
+                      <Input
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                        placeholder="John"
+                        className="bg-white/5 border-white/10 text-white placeholder:text-white/30 h-14 rounded-2xl focus:ring-blue-500/50"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-white/70 uppercase tracking-wider ml-1">Nama Belakang</label>
+                      <Input
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                        placeholder="Doe"
+                        className="bg-white/5 border-white/10 text-white placeholder:text-white/30 h-14 rounded-2xl focus:ring-blue-500/50"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-white/70 uppercase tracking-wider ml-1">Username</label>
+                  <Input
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    placeholder="Masukkan username"
+                    className="bg-white/5 border-white/10 text-white h-14 rounded-2xl focus:ring-blue-500/50 placeholder:text-white/30"
+                    autoComplete="username"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center ml-1">
+                    <label className="text-xs font-bold text-white/70 uppercase tracking-wider">Password</label>
+                    {authType === "admin" && (
+                      <button
+                        type="button"
+                        className="text-xs font-medium text-blue-200 hover:text-white transition-colors"
+                        onClick={() => setShowForgotInfo(true)}
+                      >
+                        Lupa?
+                      </button>
+                    )}
+                  </div>
+                  <Input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Password"
+                    className="bg-white/5 border-white/10 text-white h-14 rounded-2xl focus:ring-blue-500/50 placeholder:text-white/30"
+                    autoComplete={authType === "admin" ? "current-password" : "new-password"}
+                    required
+                  />
+                </div>
+
+                <Button
+                  type="submit"
+                  className="w-full h-14 bg-white text-[#0044CC] hover:bg-white/90 font-black text-lg rounded-2xl shadow-2xl shadow-black/20 transition-all active:scale-95 uppercase tracking-tight"
+                  disabled={isPending}
+                >
+                  {isPending && <Loader2 className="w-5 h-5 mr-3 animate-spin" />}
+                  {authType === "admin" ? "Masuk Sekarang" : "Buat Akun"}
+                </Button>
+
+                <div className="relative my-6">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t border-white/10"></span>
+                  </div>
+                  <div className="relative flex justify-center text-sm uppercase tracking-widest font-bold">
+                    <span className="px-4 bg-[#0044CC]/20 text-blue-200/60 text-[10px] backdrop-blur-md rounded-full">Atau</span>
+                  </div>
+                </div>
+
+                <div id="googleBtn" className="w-full flex justify-center"></div>
+
+                <div className="text-center pt-4">
+                  <p className="text-sm text-blue-200/60 font-medium">
+                    {authType === "admin" ? (
+                      <>
+                        Belum punya akun?{" "}
+                        <button
+                          type="button"
+                          className="text-white font-bold hover:underline"
+                          onClick={() => setAuthType("register")}
+                        >
+                          Daftar
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        Sudah punya akun?{" "}
+                        <button
+                          type="button"
+                          className="text-white font-bold hover:underline"
+                          onClick={() => setAuthType("admin")}
+                        >
+                          Login
+                        </button>
+                      </>
+                    )}
+                  </p>
+                </div>
+              </form>
             </div>
-          </div>
+          )}
         </div>
       </div>
 
@@ -364,6 +513,35 @@ function AnnouncementPopup() {
 }
 
 function AuthenticatedApp() {
+  const { isCashier, isLoading } = useRole();
+  const [location, setLocation] = useLocation();
+  const isPOS = location.startsWith("/pos");
+
+  useEffect(() => {
+    if (!isLoading && isCashier && !isPOS) {
+      setLocation("/pos");
+    }
+  }, [isCashier, isPOS, isLoading, setLocation]);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (isPOS) {
+    return (
+      <POSProvider>
+        <Switch>
+          <Route path="/pos" component={POS} />
+          <Route component={NotFound} />
+        </Switch>
+      </POSProvider>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50/50 flex flex-col lg:flex-row">
       <Sidebar />
@@ -375,11 +553,36 @@ function AuthenticatedApp() {
             <Route path="/sessions" component={Sessions} />
             <Route path="/sessions/:id" component={SessionDetail} />
             <Route path="/roles" component={RoleManagement} />
+            <Route path="/admin/terminals" component={TerminalManagement} />
+            <Route path="/admin/promotions" component={PromotionManagement} />
+            <Route path="/admin/pos-sessions" component={POSSessions} />
+            <Route path="/inbound" component={InboundSessions} />
+            <Route path="/inbound/:id" component={InboundDetail} />
+            <Route path="/outbound" component={OutboundSessions} />
+            <Route path="/outbound/:id" component={OutboundDetail} />
             <Route path="/profile" component={Profile} />
             <Route path="/staff" component={StaffManagement} />
             <Route path="/announcements" component={Announcements} />
             <Route path="/feedback" component={FeedbackPage} />
             <Route path="/motivation" component={MotivationPage} />
+            <Route path="/production/boms" component={BOMList} />
+            <Route path="/production/boms/:id" component={BOMDetail} />
+            <Route path="/production/assembly" component={AssemblySessions} />
+            <Route path="/production/ai" component={ProductionAI} />
+            <Route path="/accounting/accounts" component={Accounts} />
+            <Route path="/accounting/journal" component={Journal} />
+            <Route path="/accounting/assets" component={Assets} />
+            <Route path="/accounting/reports" component={Reports} />
+            <Route path="/sales/invoices" component={Invoices} />
+            <Route path="/sales/invoices/new" component={NewInvoice} />
+            <Route path="/master" component={MasterData} />
+            <Route path="/master/categories" component={Categories} />
+            <Route path="/master/units" component={Units} />
+            <Route path="/master/barcode" component={BarcodeGenerator} />
+            <Route path="/master/import-export" component={MasterImportExport} />
+            <Route path="/reports/export" component={ReportsExport} />
+            <Route path="/customers" component={Customers} />
+            <Route path="/subscription" component={SubscriptionPage} />
             <Route component={NotFound} />
           </Switch>
         </div>
@@ -391,12 +594,25 @@ function AuthenticatedApp() {
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
+  const [location] = useLocation();
+  const isPOS = location.startsWith("/pos");
 
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
+    );
+  }
+
+  if (isPOS) {
+    return (
+      <POSProvider>
+        <Switch>
+          <Route path="/pos" component={POS} />
+          <Route component={NotFound} />
+        </Switch>
+      </POSProvider>
     );
   }
 

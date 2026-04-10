@@ -188,3 +188,53 @@ export function useDeleteRecordPhoto() {
     },
   });
 }
+export function useBackupSession() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const url = buildUrl(api.sessions.backup.path, { id });
+      const res = await fetch(url, { method: api.sessions.backup.method, credentials: "include" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Gagal memicu backup");
+      }
+      return res.json();
+    },
+    onSuccess: (_, id) => {
+      queryClient.invalidateQueries({ queryKey: [api.sessions.get.path, id] });
+      toast({ title: "Backup Dimulai", description: "Proses sinkronisasi ke Google Drive sedang berjalan di latar belakang." });
+    },
+    onError: (error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+}
+
+export function useVerifyBackup() {
+  const queryClient = useQueryClient();
+  const { toast } = useToast();
+
+  return useMutation({
+    mutationFn: async (id: number) => {
+      const url = buildUrl(api.sessions.verifyBackup.path, { id });
+      const res = await fetch(url, { method: api.sessions.verifyBackup.method, credentials: "include" });
+      const result = await res.json();
+      if (!res.ok) {
+        throw new Error(result.message || "Gagal melakukan verifikasi");
+      }
+      return result;
+    },
+    onSuccess: (data, id) => {
+      queryClient.invalidateQueries({ queryKey: [api.sessions.get.path, id] });
+      toast({ 
+        title: "Verifikasi Sukses", 
+        description: data.message,
+      });
+    },
+    onError: (error) => {
+      toast({ title: "Verifikasi Gagal", description: error.message, variant: "destructive" });
+    },
+  });
+}

@@ -2,13 +2,26 @@ import { pgTable, text, serial, integer, timestamp, real } from "drizzle-orm/pg-
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
+import { users, type User } from "./models/auth";
 
 export * from "./models/auth";
 
 export const userRoles = pgTable("user_roles", {
   id: serial("id").primaryKey(),
   userId: text("user_id").notNull().unique(),
-  role: text("role", { enum: ["admin", "driver", "sku_manager", "stock_counter", "stock_counter_toko", "stock_counter_gudang"] }).default("stock_counter").notNull(),
+  role: text("role", { enum: ["admin", "driver", "cashier", "production", "sku_manager", "stock_counter", "stock_counter_toko", "stock_counter_gudang"] }).default("stock_counter").notNull(),
+});
+
+export const moduleSubscriptions = pgTable("module_subscriptions", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  moduleName: text("module_name").notNull(), // e.g., 'pos', 'accounting', 'production'
+  orderId: text("order_id").notNull().unique(), // e.g., MID-xxx
+  amount: real("amount").notNull(),
+  status: text("status", { enum: ["pending", "settlement", "expire", "cancel"] }).default("pending").notNull(),
+  paymentUrl: text("payment_url"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  paidAt: timestamp("paid_at"),
 });
 
 export const products = pgTable("products", {
@@ -25,7 +38,28 @@ export const products = pgTable("products", {
   photoUrl: text("photo_url"),
   userId: text("user_id").notNull(),
   locationType: text("location_type", { enum: ["toko", "gudang"] }).default("toko"),
+  productType: text("product_type", { enum: ["finished_good", "raw_material", "component"] }).default("finished_good").notNull(),
+  minStock: integer("min_stock").default(0).notNull(),
+  isTaxable: integer("is_taxable").default(1).notNull(),
+  taxRate: real("tax_rate").default(11.0).notNull(),
+  isBundled: integer("is_bundled").default(0).notNull(),
   updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const categories = pgTable("categories", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  userId: text("user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const units = pgTable("units", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  userId: text("user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const productPhotos = pgTable("product_photos", {
@@ -56,6 +90,8 @@ export const opnameSessions = pgTable("opname_sessions", {
   startedByName: text("started_by_name"),
   assignedTo: text("assigned_to"),
   gDriveUrl: text("g_drive_url"),
+  backupStatus: text("backup_status", { enum: ["none", "pending", "moved", "verified"] }).default("none").notNull(),
+  backupLogs: text("backup_logs"),
 });
 
 export const opnameRecords = pgTable("opname_records", {
@@ -211,9 +247,198 @@ export const bomItems = pgTable("bom_items", {
 export const assemblySessions = pgTable("assembly_sessions", {
   id: serial("id").primaryKey(),
   bomId: integer("bom_id").references(() => boms.id).notNull(),
-  quantityProduced: integer("quantity_produced").notNull(),
-  totalCost: real("total_cost"),
+  quantityProduced: real("quantity_produced").notNull(),
+  status: text("status").default("completed").notNull(),
   notes: text("notes"),
+  userId: text("user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// === Pricing & Bundling ===
+export const tieredPricing = pgTable("tiered_pricing", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
+  minQuantity: real("min_quantity").notNull(),
+  price: real("price").notNull(),
+  userId: text("user_id").notNull(),
+});
+
+export const productBundles = pgTable("product_bundles", {
+  id: serial("id").primaryKey(),
+  parentProductId: integer("parent_product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
+  childProductId: integer("child_product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
+  quantity: real("quantity").notNull(),
+});
+
+// === CRM & Sales (POS) ===
+export const customers = pgTable("customers", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  phone: text("phone"),
+  email: text("email"),
+  points: integer("points").default(0).notNull(),
+  userId: text("user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const sales = pgTable("sales", {
+  id: serial("id").primaryKey(),
+  uuid: text("uuid").notNull(),
+  invoiceNumber: text("invoice_number").unique(),
+  customerId: integer("customer_id").references(() => customers.id),
+  totalAmount: real("total_amount").notNull(),
+  discountAmount: real("discount_amount").default(0).notNull(),
+  taxAmount: real("tax_amount").default(0).notNull(),
+  paymentMethod: text("payment_method").notNull(), // cash, transfer, qris
+  paymentStatus: text("payment_status").notNull(), // paid, pending, partial, overdue
+  notes: text("notes"),
+  userId: text("user_id").notNull(),
+  branchId: integer("branch_id").references(() => branches.id),
+  type: text("type").default("pos").notNull(), // pos, erp_invoice
+  dueDate: timestamp("due_date"),
+  salespersonId: text("salesperson_id"),
+  voidedAt: timestamp("voided_at"),
+  voidedBy: text("voided_by"),
+  sessionId: integer("session_id").references(() => posSessions.id),
+  voucherId: integer("voucher_id").references(() => vouchers.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const promotions = pgTable("promotions", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  type: text("type", { enum: ["fixed", "percentage"] }).notNull(),
+  value: real("value").notNull(),
+  startTime: text("start_time"), // HH:mm
+  endTime: text("end_time"),     // HH:mm
+  daysOfWeek: text("days_of_week"), // 0-6 comma separated
+  productId: integer("product_id").references(() => products.id),
+  userId: text("user_id").notNull(),
+  active: integer("active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const saleItems = pgTable("sale_items", {
+  id: serial("id").primaryKey(),
+  saleId: integer("sale_id").references(() => sales.id, { onDelete: "cascade" }).notNull(),
+  productId: integer("product_id").references(() => products.id).notNull(),
+  quantity: real("quantity").notNull(),
+  unitPrice: real("unit_price").notNull(),
+  subtotal: real("subtotal").notNull(),
+  discountAmount: real("discount_amount").default(0).notNull(),
+  appliedPromotionId: integer("applied_promotion_id").references(() => promotions.id),
+});
+
+export const posRegistrationCodes = pgTable("pos_registration_codes", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull(),
+  userId: text("user_id").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const posDevices = pgTable("pos_devices", {
+  id: serial("id").primaryKey(),
+  deviceId: text("device_id").notNull().unique(),
+  name: text("name").notNull(),
+  userId: text("user_id").notNull(),
+  assignedUserId: text("assigned_user_id"),
+  active: integer("active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const posSessions = pgTable("pos_sessions", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  startTime: timestamp("start_time").defaultNow().notNull(),
+  endTime: timestamp("end_time"),
+  openingBalance: real("opening_balance").notNull(),
+  closingBalance: real("closing_balance"),
+  actualCash: real("actual_cash"),
+  status: text("status", { enum: ["open", "closed"] }).default("open").notNull(),
+  notes: text("notes"),
+});
+
+export const posPettyCash = pgTable("pos_petty_cash", {
+  id: serial("id").primaryKey(),
+  sessionId: integer("session_id").references(() => posSessions.id).notNull(),
+  amount: real("amount").notNull(),
+  description: text("description").notNull(),
+  type: text("type", { enum: ["in", "out"] }).default("out").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const posPendingSales = pgTable("pos_pending_sales", {
+  id: serial("id").primaryKey(),
+  sessionId: integer("session_id").references(() => posSessions.id).notNull(),
+  cartData: text("cart_data").notNull(), // JSON string
+  customerName: text("customer_name"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const vouchers = pgTable("vouchers", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull().unique(),
+  type: text("type", { enum: ["fixed", "percentage"] }).notNull(),
+  value: real("value").notNull(),
+  minPurchase: real("min_purchase").default(0).notNull(),
+  expiryDate: timestamp("expiry_date"),
+  userId: text("user_id").notNull(),
+  active: integer("active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const settings = pgTable("settings", {
+  id: serial("id").primaryKey(),
+  storeName: text("store_name").default("Stockify Shop").notNull(),
+  storeAddress: text("store_address"),
+  storePhone: text("store_phone"),
+  storeLogo: text("store_logo"),
+  userId: text("user_id").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// === Accounting (Double-Entry & Assets) ===
+
+export const accounts = pgTable("accounts", {
+  id: serial("id").primaryKey(),
+  code: text("code").notNull(),
+  name: text("name").notNull(),
+  type: text("type", { enum: ["asset", "liability", "equity", "income", "expense"] }).notNull(),
+  description: text("description"),
+  userId: text("user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const journalEntries = pgTable("journal_entries", {
+  id: serial("id").primaryKey(),
+  date: timestamp("date").defaultNow().notNull(),
+  description: text("description").notNull(),
+  reference: text("reference"),
+  userId: text("user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const journalItems = pgTable("journal_items", {
+  id: serial("id").primaryKey(),
+  entryId: integer("entry_id").references(() => journalEntries.id, { onDelete: "cascade" }).notNull(),
+  accountId: integer("account_id").references(() => accounts.id).notNull(),
+  debit: real("debit").default(0).notNull(),
+  credit: real("credit").default(0).notNull(),
+  userId: text("user_id").notNull(),
+});
+
+export const fixedAssets = pgTable("fixed_assets", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  purchasePrice: real("purchase_price").notNull(),
+  purchaseDate: timestamp("purchase_date").notNull(),
+  usefulLifeMonths: integer("useful_life_months").notNull(),
+  salvageValue: real("salvage_value").default(0).notNull(),
+  depreciationMethod: text("depreciation_method").default("straight_line").notNull(),
+  assetAccountId: integer("asset_account_id").references(() => accounts.id),
+  expenseAccountId: integer("expense_account_id").references(() => accounts.id),
+  accumDeprAccountId: integer("accum_depr_account_id").references(() => accounts.id),
   userId: text("user_id").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -260,12 +485,6 @@ export const opnameRecordPhotosRelations = relations(opnameRecordPhotos, ({ one 
 
 export const opnameSessionsRelations = relations(opnameSessions, ({ many }) => ({
   records: many(opnameRecords),
-}));
-
-export const staffMembersRelations = relations(staffMembers, ({ }) => ({}));
-
-export const branchesRelations = relations(branches, ({ many }) => ({
-  transfers: many(outboundSessions),
 }));
 
 export const inboundSessionsRelations = relations(inboundSessions, ({ many }) => ({
@@ -344,12 +563,51 @@ export const assemblySessionsRelations = relations(assemblySessions, ({ one }) =
   }),
 }));
 
+export const customersRelations = relations(customers, ({ many }) => ({
+  sales: many(sales),
+}));
+
+export const salesRelations = relations(sales, ({ one, many }) => ({
+  customer: one(customers, {
+    fields: [sales.customerId],
+    references: [customers.id],
+  }),
+  salesperson: one(users, {
+    fields: [sales.salespersonId],
+    references: [users.id],
+  }),
+  branch: one(branches, {
+    fields: [sales.branchId],
+    references: [branches.id],
+  }),
+  items: many(saleItems),
+}));
+
+export const saleItemsRelations = relations(saleItems, ({ one }) => ({
+  sale: one(sales, {
+    fields: [saleItems.saleId],
+    references: [sales.id],
+  }),
+  product: one(products, {
+    fields: [saleItems.productId],
+    references: [products.id],
+  }),
+}));
+
+export const posDevicesRelations = relations(posDevices, ({ one }) => ({
+  assignedUser: one(users, {
+    fields: [posDevices.assignedUserId],
+    references: [users.id],
+  }),
+}));
+
 // === Insert Schemas ===
 
 export const insertProductSchema = createInsertSchema(products).omit({ id: true, updatedAt: true });
 export const insertSessionSchema = createInsertSchema(opnameSessions).omit({ id: true, startedAt: true, completedAt: true });
 export const insertRecordSchema = createInsertSchema(opnameRecords).omit({ id: true });
 export const insertUserRoleSchema = createInsertSchema(userRoles).omit({ id: true });
+export const insertModuleSubscriptionSchema = createInsertSchema(moduleSubscriptions).omit({ id: true, createdAt: true, paidAt: true });
 export const insertProductPhotoSchema = createInsertSchema(productPhotos).omit({ id: true, createdAt: true });
 export const insertProductUnitSchema = createInsertSchema(productUnits).omit({ id: true });
 export const insertStaffMemberSchema = createInsertSchema(staffMembers).omit({ id: true });
@@ -357,7 +615,6 @@ export const insertAnnouncementSchema = createInsertSchema(announcements).omit({
 export const insertFeedbackSchema = createInsertSchema(feedback).omit({ id: true, createdAt: true });
 export const insertMotivationMessageSchema = createInsertSchema(motivationMessages).omit({ id: true });
 export const insertCategoryPrioritySchema = createInsertSchema(categoryPriorities).omit({ id: true });
-
 export const insertBranchSchema = createInsertSchema(branches).omit({ id: true });
 export const insertInboundSessionSchema = createInsertSchema(inboundSessions).omit({ id: true, startedAt: true, completedAt: true });
 export const insertInboundItemSchema = createInsertSchema(inboundItems).omit({ id: true });
@@ -366,70 +623,118 @@ export const insertOutboundItemSchema = createInsertSchema(outboundItems).omit({
 export const insertBomSchema = createInsertSchema(boms).omit({ id: true });
 export const insertBomItemSchema = createInsertSchema(bomItems).omit({ id: true });
 export const insertAssemblySessionSchema = createInsertSchema(assemblySessions).omit({ id: true, createdAt: true });
+export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true, createdAt: true });
+export const insertSaleSchema = createInsertSchema(sales).omit({ id: true, createdAt: true });
+export const insertSaleItemSchema = createInsertSchema(saleItems).omit({ id: true });
+export const insertAccountSchema = createInsertSchema(accounts).omit({ id: true, createdAt: true });
+export const insertJournalEntrySchema = createInsertSchema(journalEntries).omit({ id: true, createdAt: true });
+export const insertJournalItemSchema = createInsertSchema(journalItems).omit({ id: true });
+export const insertFixedAssetSchema = createInsertSchema(fixedAssets).omit({ id: true, createdAt: true });
+export const insertPosDeviceSchema = createInsertSchema(posDevices).omit({ id: true, createdAt: true });
+export const insertPosRegistrationCodeSchema = createInsertSchema(posRegistrationCodes).omit({ id: true, createdAt: true });
+export const insertPromotionSchema = createInsertSchema(promotions).omit({ id: true, createdAt: true });
+export const insertPosSessionSchema = createInsertSchema(posSessions).omit({ id: true });
+export const insertPosPettyCashSchema = createInsertSchema(posPettyCash).omit({ id: true, createdAt: true });
+export const insertPosPendingSaleSchema = createInsertSchema(posPendingSales).omit({ id: true, createdAt: true });
+export const insertTieredPricingSchema = createInsertSchema(tieredPricing).omit({ id: true });
+export const insertProductBundleSchema = createInsertSchema(productBundles).omit({ id: true });
+export const insertVoucherSchema = createInsertSchema(vouchers).omit({ id: true, createdAt: true });
+export const insertSettingsSchema = createInsertSchema(settings).omit({ id: true, updatedAt: true });
+export const insertCategorySchema = createInsertSchema(categories).omit({ id: true, createdAt: true });
+export const insertUnitSchema = createInsertSchema(units).omit({ id: true, createdAt: true });
 
 // === Types ===
 
 export type Product = typeof products.$inferSelect;
 export type InsertProduct = z.infer<typeof insertProductSchema>;
-
 export type ProductPhoto = typeof productPhotos.$inferSelect;
 export type InsertProductPhoto = z.infer<typeof insertProductPhotoSchema>;
-
 export type ProductUnit = typeof productUnits.$inferSelect;
 export type InsertProductUnit = z.infer<typeof insertProductUnitSchema>;
-
 export type OpnameSession = typeof opnameSessions.$inferSelect;
 export type InsertOpnameSession = z.infer<typeof insertSessionSchema>;
-
 export type OpnameRecord = typeof opnameRecords.$inferSelect;
 export type InsertOpnameRecord = z.infer<typeof insertRecordSchema>;
-
 export type OpnameRecordPhoto = typeof opnameRecordPhotos.$inferSelect;
-
 export type UserRole = typeof userRoles.$inferSelect;
 export type InsertUserRole = z.infer<typeof insertUserRoleSchema>;
-
+export type ModuleSubscription = typeof moduleSubscriptions.$inferSelect;
+export type InsertModuleSubscription = z.infer<typeof insertModuleSubscriptionSchema>;
 export type StaffMember = typeof staffMembers.$inferSelect;
 export type InsertStaffMember = z.infer<typeof insertStaffMemberSchema>;
-
 export type Announcement = typeof announcements.$inferSelect;
 export type InsertAnnouncement = z.infer<typeof insertAnnouncementSchema>;
-
 export type Feedback = typeof feedback.$inferSelect;
 export type InsertFeedback = z.infer<typeof insertFeedbackSchema>;
-
 export type MotivationMessage = typeof motivationMessages.$inferSelect;
 export type InsertMotivationMessage = z.infer<typeof insertMotivationMessageSchema>;
-
 export type CategoryPriority = typeof categoryPriorities.$inferSelect;
 export type InsertCategoryPriority = z.infer<typeof insertCategoryPrioritySchema>;
-
 export type Branch = typeof branches.$inferSelect;
 export type InsertBranch = z.infer<typeof insertBranchSchema>;
-
 export type InboundSession = typeof inboundSessions.$inferSelect;
 export type InsertInboundSession = z.infer<typeof insertInboundSessionSchema>;
-
 export type InboundItem = typeof inboundItems.$inferSelect;
 export type InsertInboundItem = z.infer<typeof insertInboundItemSchema>;
-
 export type OutboundSession = typeof outboundSessions.$inferSelect;
 export type InsertOutboundSession = z.infer<typeof insertOutboundSessionSchema>;
-
 export type OutboundItem = typeof outboundItems.$inferSelect;
 export type InsertOutboundItem = z.infer<typeof insertOutboundItemSchema>;
-
 export type Bom = typeof boms.$inferSelect;
 export type InsertBom = z.infer<typeof insertBomSchema>;
-
 export type BomItem = typeof bomItems.$inferSelect;
 export type InsertBomItem = z.infer<typeof insertBomItemSchema>;
-
 export type AssemblySession = typeof assemblySessions.$inferSelect;
 export type InsertAssemblySession = z.infer<typeof insertAssemblySessionSchema>;
-
+export type Customer = typeof customers.$inferSelect;
+export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
+export type Sale = typeof sales.$inferSelect;
+export type InsertSale = z.infer<typeof insertSaleSchema>;
+export type SaleItem = typeof saleItems.$inferSelect;
+export type InsertSaleItem = z.infer<typeof insertSaleItemSchema>;
+export type Account = typeof accounts.$inferSelect;
+export type InsertAccount = z.infer<typeof insertAccountSchema>;
+export type JournalEntry = typeof journalEntries.$inferSelect;
+export type InsertJournalEntry = z.infer<typeof insertJournalEntrySchema>;
+export type JournalItem = typeof journalItems.$inferSelect;
+export type InsertJournalItem = z.infer<typeof insertJournalItemSchema>;
+export type FixedAsset = typeof fixedAssets.$inferSelect;
+export type InsertFixedAsset = z.infer<typeof insertFixedAssetSchema>;
+export type PosDevice = typeof posDevices.$inferSelect;
+export type InsertPosDevice = z.infer<typeof insertPosDeviceSchema>;
+export type Promotion = typeof promotions.$inferSelect;
+export type InsertPromotion = z.infer<typeof insertPromotionSchema>;
+export type PosSession = typeof posSessions.$inferSelect;
+export type InsertPosSession = z.infer<typeof insertPosSessionSchema>;
+export type PosPettyCash = typeof posPettyCash.$inferSelect;
+export type InsertPosPettyCash = z.infer<typeof insertPosPettyCashSchema>;
+export type PosPendingSale = typeof posPendingSales.$inferSelect;
+export type InsertPosPendingSale = z.infer<typeof insertPosPendingSaleSchema>;
+export type TieredPricing = typeof tieredPricing.$inferSelect;
+export type InsertTieredPricing = z.infer<typeof insertTieredPricingSchema>;
+export type ProductBundle = typeof productBundles.$inferSelect;
+export type InsertProductBundle = z.infer<typeof insertProductBundleSchema>;
+export type Voucher = typeof vouchers.$inferSelect;
+export type InsertVoucher = z.infer<typeof insertVoucherSchema>;
+export type Settings = typeof settings.$inferSelect;
+export type InsertSettings = z.infer<typeof insertSettingsSchema>;
+export type Category = typeof categories.$inferSelect;
+export type InsertCategory = z.infer<typeof insertCategorySchema>;
+export type Unit = typeof units.$inferSelect;
+export type InsertUnit = z.infer<typeof insertUnitSchema>;
+export type InsertPosRegistrationCode = typeof posRegistrationCodes.$inferInsert;
+export type InboundItemPhoto = typeof inboundItemPhotos.$inferSelect;
+export type OutboundItemPhoto = typeof outboundItemPhotos.$inferSelect;
 export type ProductWithPhotosAndUnits = Product & { photos: ProductPhoto[]; units: ProductUnit[] };
 export type OpnameRecordWithProduct = OpnameRecord & { product: Product & { photos: ProductPhoto[]; units: ProductUnit[] }; photos: OpnameRecordPhoto[] };
 export type OpnameSessionWithRecords = OpnameSession & { records: OpnameRecordWithProduct[] };
 export type InboundSessionWithItems = InboundSession & { items: (InboundItem & { product: Product; photos: any[] })[] };
 export type OutboundSessionWithItems = OutboundSession & { items: (OutboundItem & { product: Product; photos: any[] })[]; toBranch: Branch | null };
+export type BomWithItems = Bom & { items: (BomItem & { product: Product })[]; targetProduct: Product };
+export type SaleWithItems = Sale & {
+  items: (SaleItem & { product: Product })[];
+  customer: Customer | null;
+  salesperson?: User | null;
+  salespersonName?: string;
+};
+export type AssemblySessionWithBOM = AssemblySession & { bom: Bom & { targetProduct: Product } };

@@ -1,8 +1,8 @@
-import { useSession, useUpdateRecord, useCompleteSession, useUploadOpnamePhoto, useUploadRecordPhoto, useDeleteRecordPhoto } from "@/hooks/use-sessions";
+import { useSession, useUpdateRecord, useCompleteSession, useUploadOpnamePhoto, useUploadRecordPhoto, useDeleteRecordPhoto, useBackupSession, useVerifyBackup } from "@/hooks/use-sessions";
 import { useCategories, useCategoryPriorities, useSetCategoryPriorities } from "@/hooks/use-products";
 import { useRole } from "@/hooks/use-role";
 import { useParams, useLocation } from "wouter";
-import { ArrowLeft, CheckCircle2, Download, Search, Loader2, Filter, Camera, Image, X, FileArchive, Trash2, Plus, Printer, MapPin, User, CalendarDays, CheckSquare, ListOrdered, ArrowUp, ArrowDown, GripVertical, ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Download, Search, Loader2, Filter, Camera, Image, X, FileArchive, Trash2, Plus, Printer, MapPin, User, CalendarDays, CheckSquare, ListOrdered, ArrowUp, ArrowDown, GripVertical, ZoomIn, ZoomOut, RotateCcw, ChevronLeft, ChevronRight, AlertTriangle, Clock, History } from "lucide-react";
 import { BatchPhotoUpload } from "@/components/BatchPhotoUpload";
 import { useBackgroundUpload } from "@/components/BackgroundUpload";
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,8 @@ export default function SessionDetail() {
   const { data: categories } = useCategories();
   const { canCount } = useRole();
   const completeSession = useCompleteSession();
+  const backupSession = useBackupSession();
+  const verifyBackup = useVerifyBackup();
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [completionDialogOpen, setCompletionDialogOpen] = useState(false);
@@ -260,28 +262,13 @@ export default function SessionDetail() {
 
   return (
     <div className="space-y-6 animate-enter pb-12">
-      {isBackedUp && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-3 text-amber-800 shadow-sm animate-in fade-in slide-in-from-top-4 duration-500">
-          <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
-            <AlertTriangle className="w-5 h-5 text-amber-600" />
-          </div>
-          <div>
-            <p className="font-bold">File Sudah Di-backup</p>
-            <p className="text-sm opacity-90">File foto untuk sesi ini sudah tidak bisa diakses di aplikasi karena sudah di-backup ke Google Drive untuk menghemat ruang VPS.</p>
-            {gDriveUrl && gDriveUrl !== "no_photos" && gDriveUrl !== "done_no_link" && !gDriveUrl.startsWith('backed_up_') && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="mt-2 bg-white text-amber-700 border-amber-200 hover:bg-amber-100 font-bold"
-                onClick={() => window.open(gDriveUrl, '_blank')}
-              >
-                <FileArchive className="w-4 h-4 mr-2" />
-                Buka Folder di Google Drive
-              </Button>
-            )}
-          </div>
-        </div>
-      )}
+      <BackupStatusCard 
+        session={session} 
+        onBackup={() => backupSession.mutate(sessionId)}
+        onVerify={() => verifyBackup.mutate(sessionId)}
+        isBackupLoading={backupSession.isPending}
+        isVerifyLoading={verifyBackup.isPending}
+      />
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4">
         <div className="flex items-center gap-4">
           <Button variant="outline" size="icon" onClick={() => setLocation("/sessions")} data-testid="button-back">
@@ -445,8 +432,10 @@ export default function SessionDetail() {
           </SelectTrigger>
           <SelectContent className="bg-card border border-border">
             <SelectItem value="all">All Categories</SelectItem>
-            {categories?.map(cat => (
-              <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+            {categories?.map((cat: any) => (
+              <SelectItem key={typeof cat === 'string' ? cat : cat.id} value={typeof cat === 'string' ? cat : cat.name}>
+                {typeof cat === 'string' ? cat : cat.name}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
@@ -459,7 +448,7 @@ export default function SessionDetail() {
       <SessionCategoryPriorityDialog
         open={categoryPriorityOpen}
         onOpenChange={setCategoryPriorityOpen}
-        categories={categories ?? []}
+        categories={(categories as any) ?? []}
       />
 
       <div className="bg-card border border-border/50 rounded-2xl shadow-sm overflow-hidden hidden md:block">
@@ -1718,3 +1707,81 @@ const MobileRecordCard = memo(({ record, sessionId, readOnly, isCompleted, isGud
 });
 
 
+function BackupStatusCard({ session, onBackup, onVerify, isBackupLoading, isVerifyLoading }: any) {
+  const status = session.backupStatus || 'none';
+  const gDriveUrl = session.gDriveUrl;
+  const isOld = session.isOld; // We should probably get this from the backend or compute it
+
+  const getStatusConfig = () => {
+    switch (status) {
+      case 'verified':
+        return { label: 'Terverifikasi (Aman)', bg: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: CheckCircle2 };
+      case 'moved':
+        return { label: 'Sudah Dipindahkan', bg: 'bg-blue-50 text-blue-700 border-blue-200', icon: FileArchive };
+      case 'pending':
+        return { label: 'Antrean Backup', bg: 'bg-amber-50 text-amber-700 border-amber-200', icon: Clock };
+      default:
+        return { label: 'Menunggu (Dalam 3 Hari)', bg: 'bg-slate-50 text-slate-600 border-slate-200', icon: History };
+    }
+  };
+
+  const config = getStatusConfig();
+  const hasPhotos = session.records.some((r: any) => r.photoUrl || (r.photos && r.photos.length > 0));
+
+  if (!hasPhotos && status === 'none') return null;
+
+  return (
+    <div className={cn("rounded-2xl p-5 border shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4 transition-all animate-in fade-in slide-in-from-top-4", config.bg)}>
+      <div className="flex items-center gap-4">
+        <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 shadow-sm", config.bg.replace('50', '100'))}>
+          <config.icon className="w-6 h-6" />
+        </div>
+        <div className="space-y-1">
+          <div className="flex items-center gap-2">
+            <p className="font-black uppercase tracking-widest text-[10px] opacity-60">Status Backup G-Drive</p>
+            <Badge variant="outline" className={cn("text-[8px] font-black uppercase px-2 py-0 border-current")}>{config.label}</Badge>
+          </div>
+          <p className="text-sm font-bold leading-tight">
+            {status === 'verified' ? 'Data sudah aman di Google Drive dan terverifikasi.' : 
+             status === 'moved' ? 'Data sudah dipindahkan. Silakan verifikasi untuk kepastian 100%.' :
+             status === 'pending' ? 'Data sedang dalam antrean sinkronisasi rclone.' :
+             'Menunggu 3 hari untuk sinkronisasi otomatis ke Google Drive.'}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-2 w-full md:w-auto">
+        {gDriveUrl && gDriveUrl !== 'no_photos' && (
+          <Button 
+            variant="outline" 
+            size="sm" 
+            className="bg-white/50 border-white hover:bg-white font-bold h-10 px-4 rounded-xl"
+            onClick={() => window.open(gDriveUrl, '_blank')}
+          >
+            <Download className="w-4 h-4 mr-2" />
+            Buka G-Drive
+          </Button>
+        )}
+        
+        {status !== 'verified' && (
+          <Button 
+            variant="default" 
+            size="sm" 
+            disabled={isBackupLoading || isVerifyLoading}
+            className="bg-primary hover:bg-primary/90 text-white font-bold h-10 px-6 shadow-lg shadow-primary/20 rounded-xl"
+            onClick={status === 'moved' ? onVerify : onBackup}
+          >
+            {isBackupLoading || isVerifyLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin mr-2" />
+            ) : status === 'moved' ? (
+              <CheckCircle2 className="w-4 h-4 mr-2" />
+            ) : (
+              <ArrowUp className="w-4 h-4 mr-2" />
+            )}
+            {status === 'moved' ? 'VERIFIKASI MANUAL' : 'PINDAHKAN SEKARANG (TEST)'}
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -14,13 +14,17 @@ export const sessions = pgTable(
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   username: varchar("username").unique().notNull(),
-  password: varchar("password").notNull(),
+  password: varchar("password"),
   firstName: varchar("first_name"),
   lastName: varchar("last_name"),
   email: varchar("email"),
   profileImageUrl: varchar("profile_image_url"),
   adminId: varchar("admin_id"),
+  posPin: varchar("pos_pin"),
+  googleId: varchar("google_id"),
+  subscribedModules: jsonb("subscribed_modules").default(['pos']),
   gDriveRemote: varchar("g_drive_remote"),
+  trialEndsAt: timestamp("trial_ends_at"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

@@ -78,5 +78,10 @@ export default defineConfig({
       strict: true,
       deny: ["**/.*"],
     },
+    watch: {
+      usePolling: true,
+      interval: 100,
+    },
+    host: "0.0.0.0",
   },
 });

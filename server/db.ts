@@ -36,9 +36,9 @@ console.log(`[db] Database URL: ${maskUrl(databaseUrl)}`);
 
 export const pool = new Pool({
   connectionString: databaseUrl,
-  max: 10,
+  max: 20,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000,
+  connectionTimeoutMillis: 30000,
 });
 
 // Verifikasi koneksi saat startup

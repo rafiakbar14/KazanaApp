@@ -432,7 +432,7 @@ function CreateSessionDialog({
 }
 
 function GDriveSettingsDialog() {
-  const { data: roleData, refetch } = useRole();
+  const { roleData, refetch } = useRole();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [remoteName, setRemoteName] = useState(roleData?.gDriveRemote || "gdrive");

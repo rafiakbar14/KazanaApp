@@ -76,6 +76,7 @@ export function useAuth() {
     },
     onSuccess: () => {
       queryClient.clear();
+      sessionStorage.clear();
       window.location.href = "/";
     },
   });
