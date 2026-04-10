@@ -91,12 +91,14 @@ export default function SessionDetail() {
     if (!session?.records) return [];
     let filtered = session.records.filter(r => {
       const searchLower = search.toLowerCase();
-      const matchesSearch = r.product.name.toLowerCase().includes(searchLower) ||
+      const matchesSearch = searchLower === "" || 
+        r.product.name.toLowerCase().includes(searchLower) ||
         r.product.sku.toLowerCase().includes(searchLower) ||
         (r.product.productCode && r.product.productCode.toLowerCase().includes(searchLower)) ||
         (r.product.subCategory && r.product.subCategory.toLowerCase().includes(searchLower));
-      const matchesCategory = categoryFilter === "all" || 
-        (r.product.category?.trim() === categoryFilter?.trim());
+      const pCat = String(r.product.category || "").trim();
+      const fCat = String(categoryFilter || "").trim();
+      const matchesCategory = categoryFilter === "all" || (pCat === fCat);
       
       let matchesStatus = true;
       if (statusFilter === "counted") matchesStatus = r.actualStock !== null;
@@ -107,8 +109,8 @@ export default function SessionDetail() {
     if (categoryPriorities && categoryPriorities.length > 0) {
       const priorityMap = new Map(categoryPriorities.map((p: any) => [p.categoryName, p.sortOrder]));
       filtered = [...filtered].sort((a, b) => {
-        const aPriority = priorityMap.get(a.product.category) ?? 999;
-        const bPriority = priorityMap.get(b.product.category) ?? 999;
+        const aPriority = priorityMap.get(String(a.product.category || "").trim()) ?? 999;
+        const bPriority = priorityMap.get(String(b.product.category || "").trim()) ?? 999;
         return aPriority - bPriority;
       });
     }

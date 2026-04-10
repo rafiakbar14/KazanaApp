@@ -173,21 +173,26 @@ export default function Products() {
     }
   };
 
-  const filteredProducts = products?.filter((p) => {
-    const matchesSearch =
-      p.name.toLowerCase().includes(search.toLowerCase()) ||
-      p.sku.toLowerCase().includes(search.toLowerCase());
-    const matchesCategory = categoryFilter === "all" || 
-      (p.category?.trim() === categoryFilter?.trim());
-    return matchesSearch && matchesCategory;
-  })?.sort((a, b) => {
-    if (!categoryPriorities || categoryPriorities.length === 0) return 0;
-    const priorityMap = new Map(categoryPriorities.map(p => [p.categoryName, p.sortOrder]));
-    const aPriority = priorityMap.get(a.category || "") ?? 999;
-    const bPriority = priorityMap.get(b.category || "") ?? 999;
-    if (aPriority !== bPriority) return aPriority - bPriority;
-    return 0;
-  });
+  const filteredProducts = useMemo(() => {
+    if (!products) return [];
+    
+    const priorityMap = new Map((categoryPriorities || []).map(p => [p.categoryName, p.sortOrder]));
+    const searchLower = search.toLowerCase();
+    
+    return products.filter((p) => {
+      const matchesSearch =
+        p.name.toLowerCase().includes(searchLower) ||
+        p.sku.toLowerCase().includes(searchLower);
+      const matchesCategory = categoryFilter === "all" || 
+        (String(p.category || "").trim() === String(categoryFilter || "").trim());
+      return matchesSearch && matchesCategory;
+    }).sort((a, b) => {
+      const aPriority = priorityMap.get(String(a.category || "").trim()) ?? 999;
+      const bPriority = priorityMap.get(String(b.category || "").trim()) ?? 999;
+      if (aPriority !== bPriority) return aPriority - bPriority;
+      return 0;
+    });
+  }, [products, search, categoryFilter, categoryPriorities]);
 
   return (
     <div className="space-y-6 animate-enter">
