@@ -5,21 +5,29 @@ set -e
 
 echo "🚀 Memulai proses deployment..."
 
-# 1. Tarik perubahan terbaru
+# 1. Pastikan izin skrip ini sendiri aman (opsional tapi bagus)
+chmod +x "$0"
+
+# 2. Tarik perubahan terbaru
 echo "📥 Menarik kode terbaru dari Git..."
 git pull origin main
 
-# 2. Instal dependensi
+# 3. Instal dependensi
 echo "📦 Menginstal dependensi..."
 npm install
 
-# 3. Build aplikasi
+# 4. Build aplikasi
 echo "🏗️ Membangun aplikasi (Build)..."
 npm run build
 
-# 4. Sinkronisasi Database
+# 5. Sinkronisasi Database
 echo "🗄️ Sinkronisasi Database Schema..."
 npm run db:push || echo "⚠️ Peringatan: Sinkronisasi database gagal, cek koneksi."
+
+# 6. Perbaiki izin folder Uploads (Penting untuk foto)
+echo "📁 Mengatur izin folder uploads..."
+mkdir -p uploads
+chmod -R 777 uploads
 
 # Opsi A: Jika pakai Docker
 if [ -f "docker-compose.yml" ]; then
