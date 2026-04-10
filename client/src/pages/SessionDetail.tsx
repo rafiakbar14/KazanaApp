@@ -76,6 +76,12 @@ export default function SessionDetail() {
     }
   }, [staffNames, currentCounter]);
 
+  const displayCategories = useMemo(() => {
+    const fromTable = (categories || []).map(cat => (typeof cat === 'string' ? cat : cat.name).trim());
+    const fromProducts = (session?.records || []).map(r => r.product.category?.trim()).filter(Boolean) as string[];
+    return Array.from(new Set([...fromTable, ...fromProducts])).sort();
+  }, [categories, session?.records]);
+
   const isCompleted = session?.status === "completed";
 
   const records = useMemo(() => {
@@ -86,7 +92,8 @@ export default function SessionDetail() {
         r.product.sku.toLowerCase().includes(searchLower) ||
         (r.product.productCode && r.product.productCode.toLowerCase().includes(searchLower)) ||
         (r.product.subCategory && r.product.subCategory.toLowerCase().includes(searchLower));
-      const matchesCategory = categoryFilter === "all" || r.product.category === categoryFilter;
+      const matchesCategory = categoryFilter === "all" || 
+        (r.product.category?.trim() === categoryFilter?.trim());
       
       let matchesStatus = true;
       if (statusFilter === "counted") matchesStatus = r.actualStock !== null;
@@ -438,9 +445,9 @@ export default function SessionDetail() {
           </SelectTrigger>
           <SelectContent className="bg-card border border-border">
             <SelectItem value="all">Semua Kategori</SelectItem>
-            {categories?.map((cat: any) => (
-              <SelectItem key={typeof cat === 'string' ? cat : cat.id} value={typeof cat === 'string' ? cat : cat.name}>
-                {typeof cat === 'string' ? cat : cat.name}
+            {displayCategories.map((cat) => (
+              <SelectItem key={cat} value={cat}>
+                {cat}
               </SelectItem>
             ))}
           </SelectContent>

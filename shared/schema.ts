@@ -98,7 +98,7 @@ export const opnameSessions = pgTable("opname_sessions", {
 export const opnameRecords = pgTable("opname_records", {
   id: serial("id").primaryKey(),
   sessionId: integer("session_id").references(() => opnameSessions.id).notNull(),
-  productId: integer("product_id").references(() => products.id).notNull(),
+  productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
   actualStock: integer("actual_stock"),
   notes: text("notes"),
   photoUrl: text("photo_url"),
@@ -190,7 +190,7 @@ export const inboundSessions = pgTable("inbound_sessions", {
 export const inboundItems = pgTable("inbound_items", {
   id: serial("id").primaryKey(),
   sessionId: integer("session_id").references(() => inboundSessions.id).notNull(),
-  productId: integer("product_id").references(() => products.id).notNull(),
+  productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
   quantityReceived: integer("quantity_received").notNull(),
   notes: text("notes"),
 });
@@ -224,7 +224,7 @@ export const outboundSessions = pgTable("outbound_sessions", {
 export const outboundItems = pgTable("outbound_items", {
   id: serial("id").primaryKey(),
   sessionId: integer("session_id").references(() => outboundSessions.id).notNull(),
-  productId: integer("product_id").references(() => products.id).notNull(),
+  productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
   quantityShipped: integer("quantity_shipped").notNull(),
   notes: text("notes"),
 });
@@ -239,7 +239,7 @@ export const outboundItemPhotos = pgTable("outbound_item_photos", {
 // === BOM (Perakitan) ===
 export const boms = pgTable("boms", {
   id: serial("id").primaryKey(),
-  targetProductId: integer("target_product_id").references(() => products.id).notNull(),
+  targetProductId: integer("target_product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
   name: text("name").notNull(),
   version: text("version").default("1.0"),
   notes: text("notes"),
@@ -250,7 +250,7 @@ export const boms = pgTable("boms", {
 export const bomItems = pgTable("bom_items", {
   id: serial("id").primaryKey(),
   bomId: integer("bom_id").references(() => boms.id, { onDelete: "cascade" }).notNull(),
-  productId: integer("product_id").references(() => products.id).notNull(),
+  productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
   quantityNeeded: real("quantity_needed").notNull(),
 });
 
@@ -322,7 +322,7 @@ export const promotions = pgTable("promotions", {
   startTime: text("start_time"), // HH:mm
   endTime: text("end_time"),     // HH:mm
   daysOfWeek: text("days_of_week"), // 0-6 comma separated
-  productId: integer("product_id").references(() => products.id),
+  productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }),
   userId: text("user_id").notNull(),
   active: integer("active").default(1).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -331,7 +331,7 @@ export const promotions = pgTable("promotions", {
 export const saleItems = pgTable("sale_items", {
   id: serial("id").primaryKey(),
   saleId: integer("sale_id").references(() => sales.id, { onDelete: "cascade" }).notNull(),
-  productId: integer("product_id").references(() => products.id).notNull(),
+  productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
   quantity: real("quantity").notNull(),
   unitPrice: real("unit_price").notNull(),
   subtotal: real("subtotal").notNull(),

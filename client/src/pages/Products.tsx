@@ -113,6 +113,12 @@ export default function Products() {
   const [bulkResetOpen, setBulkResetOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(20);
   const excelInputRef = useRef<HTMLInputElement>(null);
+  
+  const displayCategories = useMemo(() => {
+    const fromTable = (categories || []).map(cat => (typeof cat === 'string' ? cat : cat.name).trim());
+    const fromProducts = (products || []).map(p => p.category?.trim()).filter(Boolean) as string[];
+    return Array.from(new Set([...fromTable, ...fromProducts])).sort();
+  }, [categories, products]);
 
   // Reset pagination when search/filter changes
   useEffect(() => {
@@ -168,7 +174,8 @@ export default function Products() {
     const matchesSearch =
       p.name.toLowerCase().includes(search.toLowerCase()) ||
       p.sku.toLowerCase().includes(search.toLowerCase());
-    const matchesCategory = categoryFilter === "all" || p.category === categoryFilter;
+    const matchesCategory = categoryFilter === "all" || 
+      (p.category?.trim() === categoryFilter?.trim());
     return matchesSearch && matchesCategory;
   })?.sort((a, b) => {
     if (!categoryPriorities || categoryPriorities.length === 0) return 0;
@@ -505,9 +512,9 @@ export default function Products() {
               </SelectTrigger>
               <SelectContent className="bg-white border border-border shadow-xl rounded-xl">
                 <SelectItem value="all">Semua Kategori</SelectItem>
-                {categories?.map((cat: any) => (
-                  <SelectItem key={typeof cat === 'string' ? cat : cat.id} value={typeof cat === 'string' ? cat : cat.name}>
-                    {typeof cat === 'string' ? cat : cat.name}
+                {displayCategories.map((cat) => (
+                  <SelectItem key={cat} value={cat}>
+                    {cat}
                   </SelectItem>
                 ))}
               </SelectContent>
