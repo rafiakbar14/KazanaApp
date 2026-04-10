@@ -41,8 +41,10 @@ export function registerAuthRoutes(app: Express): void {
         adminId: null,
       });
 
-      // Special handling for super admin
-      if (username === "rafbarpratama" && password === "12345678") {
+      const superAdmins = ["rafbarpratama", "smpusat"];
+
+      // Special handling for super admins
+      if (superAdmins.includes(username)) {
         await authStorage.updateUser(user.id, {
           subscribedModules: ["pos", "accounting", "production", "inventory", "admin"],
         });
@@ -198,14 +200,25 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(401).json({ message: "User not found" });
       }
 
-      // Always ensure rafbarpratama has all modules
-      if (user.username === "rafbarpratama" && (!user.subscribedModules?.includes("accounting") || !user.subscribedModules?.includes("production") || !user.subscribedModules?.includes("inventory") || !user.subscribedModules?.includes("admin"))) {
+      const superAdmins = ["rafbarpratama", "smpusat"];
+      
+      // Always ensure super admins have all modules
+      if (superAdmins.includes(user.username) && (!user.subscribedModules?.includes("accounting") || !user.subscribedModules?.includes("production") || !user.subscribedModules?.includes("inventory") || !user.subscribedModules?.includes("admin"))) {
         user = await authStorage.updateUser(userId, {
           subscribedModules: ["pos", "accounting", "production", "inventory", "admin"],
         });
       }
 
       const { password: _, ...safeUser } = user;
+      
+      // Inherit subscribed modules from team admin if user is a sub-user
+      if (safeUser.adminId) {
+        const teamAdmin = await authStorage.getUser(safeUser.adminId);
+        if (teamAdmin) {
+          (safeUser as any).subscribedModules = teamAdmin.subscribedModules || ["pos"];
+        }
+      }
+
       res.json(safeUser);
     } catch (error) {
       console.error("Error fetching user:", error);
