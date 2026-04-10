@@ -115,7 +115,10 @@ export default function Products() {
   const excelInputRef = useRef<HTMLInputElement>(null);
   
   const displayCategories = useMemo(() => {
-    const fromTable = (categories || []).map(cat => (typeof cat === 'string' ? cat : cat.name).trim());
+    const fromTable = (categories || []).map(cat => {
+      const name = typeof cat === 'string' ? cat : cat?.name;
+      return name ? name.trim() : "";
+    }).filter(Boolean);
     const fromProducts = (products || []).map(p => p.category?.trim()).filter(Boolean) as string[];
     return Array.from(new Set([...fromTable, ...fromProducts])).sort();
   }, [categories, products]);

@@ -77,7 +77,10 @@ export default function SessionDetail() {
   }, [staffNames, currentCounter]);
 
   const displayCategories = useMemo(() => {
-    const fromTable = (categories || []).map(cat => (typeof cat === 'string' ? cat : cat.name).trim());
+    const fromTable = (categories || []).map(cat => {
+      const name = typeof cat === 'string' ? cat : cat?.name;
+      return name ? name.trim() : "";
+    }).filter(Boolean);
     const fromProducts = (session?.records || []).map(r => r.product.category?.trim()).filter(Boolean) as string[];
     return Array.from(new Set([...fromTable, ...fromProducts])).sort();
   }, [categories, session?.records]);
