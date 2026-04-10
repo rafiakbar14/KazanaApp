@@ -1,3 +1,4 @@
+import * as React from "react";
 import { useState, useRef, useEffect, useMemo, useCallback, memo } from "react";
 import {
   useProducts,
@@ -114,7 +115,7 @@ export default function Products() {
   const [visibleCount, setVisibleCount] = useState(20);
   const excelInputRef = useRef<HTMLInputElement>(null);
   
-  const displayCategories = useMemo(() => {
+  const displayCategories = React.useMemo(() => {
     const fromTable = (categories || []).map(cat => {
       const name = typeof cat === 'string' ? cat : cat?.name;
       return name ? name.trim() : "";
@@ -173,7 +174,7 @@ export default function Products() {
     }
   };
 
-  const filteredProducts = useMemo(() => {
+  const filteredProducts = React.useMemo(() => {
     if (!products) return [];
     
     const priorityMap = new Map((categoryPriorities || []).map(p => [p.categoryName, p.sortOrder]));

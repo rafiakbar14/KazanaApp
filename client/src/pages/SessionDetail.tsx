@@ -12,6 +12,7 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { StatusBadge } from "@/components/StatusBadge";
+import * as React from "react";
 import { useState, useMemo, useRef, useCallback, useEffect, memo } from "react";
 import { cn, compressImage } from "@/lib/utils";
 import * as XLSX from "xlsx";
@@ -59,7 +60,7 @@ export default function SessionDetail() {
 
   const [currentCounter, setCurrentCounter] = useState<string>("");
 
-  const staffNames = useMemo(() => {
+  const staffNames = React.useMemo(() => {
     if (!session?.assignedTo) return [];
     return session.assignedTo.split(", ").map(s => s.trim());
   }, [session?.assignedTo]);
@@ -76,7 +77,7 @@ export default function SessionDetail() {
     }
   }, [staffNames, currentCounter]);
 
-  const displayCategories = useMemo(() => {
+  const displayCategories = React.useMemo(() => {
     const fromTable = (categories || []).map(cat => {
       const name = typeof cat === 'string' ? cat : cat?.name;
       return name ? name.trim() : "";
@@ -87,7 +88,7 @@ export default function SessionDetail() {
 
   const isCompleted = session?.status === "completed";
 
-  const records = useMemo(() => {
+  const records = React.useMemo(() => {
     if (!session?.records) return [];
     let filtered = session.records.filter(r => {
       const searchLower = search.toLowerCase();
