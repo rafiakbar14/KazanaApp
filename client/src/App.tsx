@@ -12,6 +12,7 @@ import Products from "@/pages/Products";
 import Sessions from "@/pages/Sessions";
 import SessionDetail from "@/pages/SessionDetail";
 import RoleManagement from "@/pages/RoleManagement";
+import ActivityLogs from "@/pages/ActivityLogs";
 import InboundSessions from "@/pages/InboundSessions";
 import InboundDetail from "@/pages/InboundDetail";
 import OutboundSessions from "@/pages/OutboundSessions";
@@ -167,7 +168,7 @@ function LoginPage() {
           <div className="bg-white/10 p-2 rounded-xl backdrop-blur-md">
             <Package className="w-8 h-8 text-white" />
           </div>
-          <span className="text-3xl font-bold text-white tracking-tight">Stockify ERP</span>
+          <span className="text-3xl font-bold text-white tracking-tight">Kazana ERP</span>
         </div>
 
         <div className="z-10 max-w-md">
@@ -553,6 +554,7 @@ function AuthenticatedApp() {
             <Route path="/sessions" component={Sessions} />
             <Route path="/sessions/:id" component={SessionDetail} />
             <Route path="/roles" component={RoleManagement} />
+            <Route path="/admin/logs" component={ActivityLogs} />
             <Route path="/admin/terminals" component={TerminalManagement} />
             <Route path="/admin/promotions" component={PromotionManagement} />
             <Route path="/admin/pos-sessions" component={POSSessions} />

@@ -21,6 +21,7 @@ type UserWithRole = {
   firstName?: string | null;
   lastName?: string | null;
   adminId?: string | null;
+  branchId?: number | null;
 };
 
 const roleLabels: Record<string, string> = {
@@ -81,6 +82,29 @@ export default function RoleManagement() {
     },
   });
 
+  const updateBranch = useMutation({
+    mutationFn: async ({ userId, branchId }: { userId: string; branchId: number }) => {
+      const res = await fetch("/api/admin/user/branch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, branchId }),
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || "Failed to update branch");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [api.roles.list.path] });
+      toast({ title: "Cabang Diperbarui", description: "Cabang penugasan user berhasil diubah." });
+    },
+    onError: (error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
   if (roleLoading || isLoading) {
     return (
       <div className="p-12 flex justify-center">
@@ -107,7 +131,18 @@ export default function RoleManagement() {
           </h1>
           <p className="text-muted-foreground mt-2">Kelola user dan akses tim Anda.</p>
         </div>
-        <CreateUserDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} />
+        <div className="flex items-center gap-2">
+          <Button 
+            variant="outline" 
+            className="rounded-xl border-primary/20 text-primary hover:bg-primary/5"
+            onClick={() => setLocation("/admin/logs")}
+            data-testid="button-view-logs"
+          >
+            <History className="w-4 h-4 mr-2" />
+            Audit Log
+          </Button>
+          <CreateUserDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} />
+        </div>
       </div>
 
       <div className="bg-card border border-border/50 rounded-2xl shadow-sm overflow-hidden">
@@ -117,6 +152,7 @@ export default function RoleManagement() {
               <tr className="bg-muted/30 border-b border-border/50">
                 <th className="px-6 py-4 font-medium text-muted-foreground">User</th>
                 <th className="px-6 py-4 font-medium text-muted-foreground">Tipe</th>
+                <th className="px-6 py-4 font-medium text-muted-foreground">Cabang</th>
                 <th className="px-6 py-4 font-medium text-muted-foreground">Role Saat Ini</th>
                 <th className="px-6 py-4 font-medium text-muted-foreground">Ubah Role</th>
                 <th className="px-6 py-4 font-medium text-muted-foreground">Aksi</th>
@@ -144,6 +180,9 @@ export default function RoleManagement() {
                   </td>
                   <td className="px-6 py-4">
                     <Badge variant="secondary">Owner</Badge>
+                  </td>
+                  <td className="px-6 py-4">
+                    <Badge variant="outline" className="text-[10px] font-bold bg-slate-50">PUSAT / HQ</Badge>
                   </td>
                   <td className="px-6 py-4">
                     <Badge className={roleBadgeColors[adminUser.role] || ""} data-testid={`badge-role-${adminUser.userId}`}>
@@ -177,6 +216,23 @@ export default function RoleManagement() {
                     <Badge variant="outline">Anggota</Badge>
                   </td>
                   <td className="px-6 py-4">
+                    <Select
+                      value={user.branchId?.toString() || "1"}
+                      onValueChange={(value) => updateBranch.mutate({ userId: user.userId, branchId: parseInt(value) })}
+                    >
+                      <SelectTrigger className="w-40 border-primary/20 bg-primary/5 text-primary">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white border border-border shadow-xl">
+                        <SelectItem value="1">Cabang 1 (Utama)</SelectItem>
+                        <SelectItem value="2">Cabang 2</SelectItem>
+                        <SelectItem value="3">Cabang 3</SelectItem>
+                        <SelectItem value="4">Cabang 4</SelectItem>
+                        <SelectItem value="5">Cabang 5</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </td>
+                  <td className="px-6 py-4">
                     <Badge className={roleBadgeColors[user.role] || ""} data-testid={`badge-role-${user.userId}`}>
                       {roleLabels[user.role] || user.role}
                     </Badge>
@@ -208,7 +264,7 @@ export default function RoleManagement() {
               ))}
               {subUsers.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
+                  <td colSpan={6} className="px-6 py-8 text-center text-muted-foreground">
                     Belum ada anggota tim. Klik "Tambah User" untuk membuat user baru.
                   </td>
                 </tr>
@@ -328,10 +384,11 @@ function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [role, setRole] = useState("stock_counter");
+  const [branchId, setBranchId] = useState("1");
   const [error, setError] = useState("");
 
   const createUser = useMutation({
-    mutationFn: async (data: { username: string; password: string; firstName: string; lastName: string; role: string }) => {
+    mutationFn: async (data: { username: string; password: string; firstName: string; lastName: string; role: string; branchId: number }) => {
       const res = await fetch("/api/auth/create-user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -353,6 +410,7 @@ function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
       setFirstName("");
       setLastName("");
       setRole("stock_counter");
+      setBranchId("1");
       setError("");
     },
     onError: (err) => {
@@ -444,6 +502,23 @@ function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
                 <SelectItem value="driver">Driver</SelectItem>
               </SelectContent>
             </Select>
+          </div>
+
+          <div>
+            <label className="text-sm font-medium text-foreground mb-1.5 block">Cabang Tugas</label>
+            <Select value={branchId} onValueChange={setBranchId}>
+              <SelectTrigger data-testid="select-new-branch">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-white border border-border shadow-xl">
+                <SelectItem value="1">Cabang 1 (Utama)</SelectItem>
+                <SelectItem value="2">Cabang 2</SelectItem>
+                <SelectItem value="3">Cabang 3</SelectItem>
+                <SelectItem value="4">Cabang 4</SelectItem>
+                <SelectItem value="5">Cabang 5</SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-muted-foreground mt-1">User hanya bisa melihat data Stock Opname di cabang pilihannya.</p>
           </div>
 
           <div className="flex justify-end gap-3 pt-2">

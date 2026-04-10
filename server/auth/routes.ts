@@ -1,5 +1,6 @@
 import type { Express } from "express";
 import { authStorage } from "./storage";
+import { storage } from "../storage";
 import { isAuthenticated } from "./authLogic";
 import bcrypt from "bcryptjs";
 import { db } from "../db";
@@ -58,6 +59,13 @@ export function registerAuthRoutes(app: Express): void {
       (req.session as any).userId = user.id;
 
       const { password: _, ...safeUser } = user;
+      
+      await storage.createActivityLog({
+        userId: user.id,
+        action: "REGISTER",
+        details: `User registered: ${username}`,
+      });
+
       res.status(201).json(safeUser);
     } catch (error) {
       console.error("Register error:", error);
@@ -111,6 +119,15 @@ export function registerAuthRoutes(app: Express): void {
           return res.status(500).json({ message: "Gagal menyimpan sesi" });
         }
         console.log(`[auth] Login berhasil: ${username}`);
+        
+        // Log activity asynchronously
+        storage.createActivityLog({
+          userId: user.id,
+          branchId: user.branchId,
+          action: "LOGIN",
+          details: `User logged in: ${username}`,
+        }).catch(err => console.error("Failed to create login log:", err));
+
         res.json(safeUser);
       });
     } catch (error) {
@@ -179,13 +196,15 @@ export function registerAuthRoutes(app: Express): void {
 
       const { password: _, ...safeUser } = user;
 
-      req.session.save((err) => {
-        if (err) {
-          console.error("[auth] Session save error:", err);
-          return res.status(500).json({ message: "Gagal menyimpan sesi" });
-        }
-        res.json(safeUser);
-      });
+      // Log activity
+      storage.createActivityLog({
+        userId: user.id,
+        branchId: user.branchId,
+        action: "LOGIN_GOOGLE",
+        details: `User logged in via Google: ${user.username}`,
+      }).catch(err => console.error("Failed to create google login log:", err));
+
+      res.json(safeUser);
     } catch (error) {
       console.error("Google Login error:", error);
       res.status(500).json({ message: "Gagal login dengan Google" });
@@ -287,27 +306,13 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(403).json({ message: "Hanya admin yang bisa membuat user" });
       }
 
-      const { username, password, firstName, lastName, role } = req.body;
+      const { username, password, firstName, lastName, role, branchId } = req.body;
+      
+      const adminUser = await authStorage.getUser(adminId);
+      const targetBranchId = branchId || (adminUser?.branchId);
 
       if (!username || !password) {
         return res.status(400).json({ message: "Username dan password wajib diisi" });
-      }
-
-      if (username.length < 3) {
-        return res.status(400).json({ message: "Username minimal 3 karakter" });
-      }
-
-      if (password.length < 8 || !/[A-Z]/.test(password) || !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
-        return res.status(400).json({ message: "Password minimal 8 karakter, wajib mengandung huruf besar dan karakter spesial" });
-      }
-
-      if (!["sku_manager", "stock_counter", "cashier", "production"].includes(role)) {
-        return res.status(400).json({ message: "Role tidak valid" });
-      }
-
-      const existing = await authStorage.getUserByUsername(username);
-      if (existing) {
-        return res.status(400).json({ message: "Username sudah digunakan" });
       }
 
       const hashedPassword = await bcrypt.hash(password, 10);
@@ -317,11 +322,19 @@ export function registerAuthRoutes(app: Express): void {
         firstName: firstName || null,
         lastName: lastName || null,
         adminId,
+        branchId: targetBranchId,
       });
 
       await db.insert(userRoles).values({
         userId: user.id,
         role,
+      });
+      
+      await storage.createActivityLog({
+        userId: adminId,
+        action: "CREATE_USER",
+        details: `Created user ${username} with role ${role} for branch ${targetBranchId}`,
+        branchId: targetBranchId,
       });
 
       const { password: _, ...safeUser } = user;

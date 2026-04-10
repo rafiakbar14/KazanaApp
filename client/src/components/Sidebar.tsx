@@ -307,7 +307,7 @@ export function Sidebar() {
               <Package className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="font-display font-bold text-xl leading-none text-white tracking-tight">Stockify</h1>
+              <h1 className="font-display font-bold text-xl leading-none text-white tracking-tight">Kazana</h1>
               <p className="text-[10px] text-blue-200 mt-1.5 font-bold uppercase tracking-widest opacity-70">Inventory Pro</p>
             </div>
           </div>

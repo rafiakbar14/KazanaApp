@@ -66,7 +66,7 @@ export default function Profile() {
 
   useEffect(() => {
     if (settings) {
-      setStoreName((settings as any).storeName || "Stockify Shop");
+      setStoreName((settings as any).storeName || "Kazana Shop");
       setStoreAddress((settings as any).storeAddress || "");
       setStorePhone((settings as any).storePhone || "");
       setStoreLogo((settings as any).storeLogo || "");

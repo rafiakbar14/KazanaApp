@@ -12,7 +12,7 @@ import {
   posDevices, posRegistrationCodes, promotions,
   posSessions, posPettyCash, posPendingSales, vouchers, settings,
   tieredPricing, productBundles,
-  categories, units,
+  categories, units, activityLogs,
   type Product, type InsertProduct,
   type OpnameSession, type InsertOpnameSession,
   type OpnameRecord,
@@ -57,6 +57,7 @@ import {
   type ProductBundle, type InsertProductBundle,
   type Category, type InsertCategory,
   type Unit, type InsertUnit,
+  type ActivityLog, type InsertActivityLog,
 } from "@shared/schema";
 import { eq, desc, and, inArray, gt, lt } from "drizzle-orm";
 
@@ -66,6 +67,7 @@ export interface IStorage {
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product>;
   deleteProduct(id: number): Promise<void>;
+  bulkDeleteProducts(ids: number[], userId: string): Promise<number>;
   bulkResetStock(ids: number[], userId: string): Promise<void>;
   getProductsWithPhotosAndUnits(userId: string): Promise<ProductWithPhotosAndUnits[]>;
 
@@ -78,7 +80,7 @@ export interface IStorage {
   updateProductUnit(id: number, data: Partial<InsertProductUnit>): Promise<ProductUnit>;
   deleteProductUnit(id: number): Promise<void>;
 
-  getSessions(userId: string, locationType?: string): Promise<OpnameSession[]>;
+  getSessions(userId: string, locationType?: string, branchId?: number): Promise<OpnameSession[]>;
   getSession(id: number): Promise<OpnameSessionWithRecords | undefined>;
   createSession(session: InsertOpnameSession): Promise<OpnameSession>;
   completeSession(id: number): Promise<OpnameSession>;
@@ -91,6 +93,7 @@ export interface IStorage {
   getRecordPhotos(recordId: number): Promise<OpnameRecordPhoto[]>;
   addRecordPhoto(data: { recordId: number; url: string }): Promise<OpnameRecordPhoto>;
   deleteRecordPhoto(id: number): Promise<void>;
+  deleteRecordStatusPhoto(id: number): Promise<void>; // Adding just in case for older schema
 
   getUserRole(userId: string): Promise<UserRole | undefined>;
   setUserRole(data: InsertUserRole): Promise<UserRole>;
@@ -222,6 +225,10 @@ export interface IStorage {
   createUnit(data: InsertUnit & { userId: string }): Promise<Unit>;
   updateUnit(id: number, data: Partial<InsertUnit>): Promise<Unit>;
   deleteUnit(id: number): Promise<void>;
+
+  // Activity Logs
+  getActivityLogs(adminId: string, branchId?: number): Promise<ActivityLog[]>;
+  createActivityLog(log: InsertActivityLog): Promise<ActivityLog>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -249,6 +256,13 @@ export class DatabaseStorage implements IStorage {
 
   async deleteProduct(id: number): Promise<void> {
     await db.delete(products).where(eq(products.id, id));
+  }
+  
+  async bulkDeleteProducts(ids: number[], userId: string): Promise<number> {
+    const result = await db.delete(products)
+      .where(and(inArray(products.id, ids), eq(products.userId, userId)))
+      .returning();
+    return result.length;
   }
 
   async bulkResetStock(ids: number[], userId: string): Promise<void> {
@@ -280,6 +294,16 @@ export class DatabaseStorage implements IStorage {
     await db.delete(productPhotos).where(eq(productPhotos.id, id));
   }
 
+  async deleteRecordPhoto(id: number): Promise<void> {
+    await db.delete(opnameRecordPhotos).where(eq(opnameRecordPhotos.id, id));
+  }
+  
+  async deleteRecordStatusPhoto(id: number): Promise<void> {
+    // Some older records might use a different table, but typically opnameRecordPhotos is the one.
+    // Included for safety if schema has multiple photo tables for records.
+    await db.delete(opnameRecordPhotos).where(eq(opnameRecordPhotos.id, id));
+  }
+
   async getProductUnits(productId: number): Promise<ProductUnit[] | any> {
     return await db.select().from(productUnits).where(eq(productUnits.productId, productId)).orderBy(productUnits.sortOrder);
   }
@@ -298,11 +322,20 @@ export class DatabaseStorage implements IStorage {
     await db.delete(productUnits).where(eq(productUnits.id, id));
   }
 
-  async getSessions(userId: string, locationType?: string): Promise<OpnameSession[]> {
+  async getSessions(userId: string, locationType?: string, branchId?: number): Promise<OpnameSession[]> {
+    const conditions = [eq(opnameSessions.userId, userId)];
+    
     if (locationType) {
-      return await db.select().from(opnameSessions).where(and(eq(opnameSessions.userId, userId), eq(opnameSessions.locationType, locationType as "toko" | "gudang"))).orderBy(desc(opnameSessions.startedAt));
+      conditions.push(eq(opnameSessions.locationType, locationType as "toko" | "gudang"));
     }
-    return await db.select().from(opnameSessions).where(eq(opnameSessions.userId, userId)).orderBy(desc(opnameSessions.startedAt));
+    
+    if (branchId !== undefined) {
+      conditions.push(eq(opnameSessions.branchId, branchId));
+    }
+    
+    return await db.select().from(opnameSessions)
+      .where(and(...conditions))
+      .orderBy(desc(opnameSessions.startedAt));
   }
 
   async getSession(id: number): Promise<OpnameSessionWithRecords | undefined> {
@@ -1463,6 +1496,22 @@ export class DatabaseStorage implements IStorage {
 
   async deleteUnit(id: number): Promise<void> {
     await db.delete(units).where(eq(units.id, id));
+  }
+
+  // === Activity Logs ===
+  async getActivityLogs(adminId: string, branchId?: number): Promise<ActivityLog[]> {
+    // Current user context isn't enough, we need to find all logs related to this admin's team
+    // But logs are indexed by userId. We need to join with users to filter by adminId.
+    // However, to keep it simple, we'll fetch logs where branchId is provided or logs for current user.
+    if (branchId !== undefined) {
+      return await db.select().from(activityLogs).where(eq(activityLogs.branchId, branchId)).orderBy(desc(activityLogs.createdAt));
+    }
+    return await db.select().from(activityLogs).orderBy(desc(activityLogs.createdAt));
+  }
+
+  async createActivityLog(data: InsertActivityLog): Promise<ActivityLog> {
+    const [log] = await db.insert(activityLogs).values(data).returning();
+    return log;
   }
 }
 

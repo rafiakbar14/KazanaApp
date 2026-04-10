@@ -20,6 +20,7 @@ import {
   type ExcelImportResult,
 } from "@/hooks/use-products";
 import { BatchPhotoUpload } from "@/components/BatchPhotoUpload";
+import { MassPhotoImporter } from "@/components/MassPhotoImporter";
 import { useBackgroundUpload } from "@/components/BackgroundUpload";
 import { useRole } from "@/hooks/use-role";
 import { api } from "@shared/routes";
@@ -103,6 +104,7 @@ export default function Products() {
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [categoryPriorityOpen, setCategoryPriorityOpen] = useState(false);
+  const [massPhotoOpen, setMassPhotoOpen] = useState(false);
 
   const [gudangImportLoading, setGudangImportLoading] = useState(false);
   const importExcel = useImportExcel();
@@ -421,6 +423,15 @@ export default function Products() {
                     />
                   </>
                 )}
+                <Button 
+                  variant="outline" 
+                  className="rounded-xl shadow-sm bg-white border-primary/20 hover:bg-primary/5 text-primary"
+                  onClick={() => setMassPhotoOpen(true)}
+                  data-testid="button-mass-photo"
+                >
+                  <Camera className="w-4 h-4 mr-2" />
+                  Bulk Photo
+                </Button>
                 <CreateProductDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} />
               </>
             )}
@@ -532,6 +543,11 @@ export default function Products() {
         open={categoryPriorityOpen}
         onOpenChange={setCategoryPriorityOpen}
         categories={(categories as any) ?? []}
+      />
+
+      <MassPhotoImporter
+        open={massPhotoOpen}
+        onOpenChange={setMassPhotoOpen}
       />
 
 

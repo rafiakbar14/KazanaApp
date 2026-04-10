@@ -50,6 +50,7 @@ export default function SessionDetail() {
   const verifyBackup = useVerifyBackup();
   const [search, setSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<string>("all");
   const [completionDialogOpen, setCompletionDialogOpen] = useState(false);
   const [downloadDialogOpen, setDownloadDialogOpen] = useState(false);
   const [categoryPriorityOpen, setCategoryPriorityOpen] = useState(false);
@@ -67,7 +68,7 @@ export default function SessionDetail() {
 
   useEffect(() => {
     setVisibleCount(20);
-  }, [search, categoryFilter]);
+  }, [search, categoryFilter, statusFilter]);
 
   useEffect(() => {
     if (staffNames.length > 0 && !currentCounter) {
@@ -86,7 +87,12 @@ export default function SessionDetail() {
         (r.product.productCode && r.product.productCode.toLowerCase().includes(searchLower)) ||
         (r.product.subCategory && r.product.subCategory.toLowerCase().includes(searchLower));
       const matchesCategory = categoryFilter === "all" || r.product.category === categoryFilter;
-      return matchesSearch && matchesCategory;
+      
+      let matchesStatus = true;
+      if (statusFilter === "counted") matchesStatus = r.actualStock !== null;
+      if (statusFilter === "uncounted") matchesStatus = r.actualStock === null;
+
+      return matchesSearch && matchesCategory && matchesStatus;
     });
     if (categoryPriorities && categoryPriorities.length > 0) {
       const priorityMap = new Map(categoryPriorities.map((p: any) => [p.categoryName, p.sortOrder]));
@@ -431,7 +437,7 @@ export default function SessionDetail() {
             <SelectValue placeholder="All Categories" />
           </SelectTrigger>
           <SelectContent className="bg-card border border-border">
-            <SelectItem value="all">All Categories</SelectItem>
+            <SelectItem value="all">Semua Kategori</SelectItem>
             {categories?.map((cat: any) => (
               <SelectItem key={typeof cat === 'string' ? cat : cat.id} value={typeof cat === 'string' ? cat : cat.name}>
                 {typeof cat === 'string' ? cat : cat.name}
@@ -439,6 +445,19 @@ export default function SessionDetail() {
             ))}
           </SelectContent>
         </Select>
+
+        <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <SelectTrigger className="w-40 bg-white">
+            <CheckCircle2 className="w-4 h-4 mr-2 text-muted-foreground" />
+            <SelectValue placeholder="Semua Status" />
+          </SelectTrigger>
+          <SelectContent className="bg-card border border-border">
+            <SelectItem value="all">Semua Status</SelectItem>
+            <SelectItem value="counted">Sudah Dihitung</SelectItem>
+            <SelectItem value="uncounted">Belum Dihitung</SelectItem>
+          </SelectContent>
+        </Select>
+
         <Button variant="outline" size="sm" onClick={() => setCategoryPriorityOpen(true)} data-testid="button-session-category-priority">
           <ListOrdered className="w-4 h-4 mr-2" />
           Urutan Kategori
@@ -738,13 +757,14 @@ function DownloadDialog({ open, onOpenChange, records, onDownload }: {
   );
 }
 
-function PhotoLightbox({ open, onOpenChange, photos, initialIndex, title, productId }: {
+function PhotoLightbox({ open, onOpenChange, photos, initialIndex, title, productId, onDelete }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   photos: string[];
   initialIndex: number;
   title: string;
   productId: number;
+  onDelete?: (idx: number) => void;
 }) {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [scale, setScale] = useState(1);
@@ -882,8 +902,22 @@ function PhotoLightbox({ open, onOpenChange, photos, initialIndex, title, produc
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[95vw] h-[95vh] max-w-[95vw] max-h-[95vh] p-0 gap-0 overflow-hidden flex flex-col">
-        <DialogHeader className="p-3 pb-1 flex-shrink-0">
+        <DialogHeader className="p-3 pb-1 flex-shrink-0 flex-row items-center justify-between space-y-0">
           <DialogTitle className="text-sm">Foto Opname - {title} ({currentIndex + 1}/{photos.length})</DialogTitle>
+          {onDelete && (
+            <Button
+              variant="destructive"
+              size="sm"
+              className="h-8 rounded-xl px-3"
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(currentIndex);
+              }}
+            >
+              <Trash2 className="w-4 h-4 mr-1.5" />
+              Hapus
+            </Button>
+          )}
         </DialogHeader>
         <div className="relative flex flex-col flex-1 min-h-0">
           <div
@@ -1056,14 +1090,25 @@ const RecordRow = memo(({ record, sessionId, readOnly, isCompleted, isGudang, cu
     const hasReturnedChanged = returnedVal !== record.returnedQuantity;
 
     if (hasActualChanged || hasReturnedChanged) {
-      updateRecord.mutate({
-        sessionId,
-        productId: record.productId,
-        actualStock: isNaN(actualVal) ? (record.actualStock ?? 0) : actualVal,
-        returnedQuantity: returnedVal,
-        countedBy: currentCounter
-      });
+      handleApply();
     }
+  };
+
+  const handleApply = () => {
+    const actualVal = parseInt(actual);
+    const returnedVal = parseInt(returned) || 0;
+    
+    updateRecord.mutate({
+      sessionId,
+      productId: record.productId,
+      actualStock: isNaN(actualVal) ? (record.actualStock ?? 0) : actualVal,
+      returnedQuantity: returnedVal,
+      countedBy: currentCounter
+    }, {
+      onSuccess: () => {
+        setIsFocused(false);
+      }
+    });
   };
 
   const handleUnitBlur = () => {
@@ -1082,15 +1127,35 @@ const RecordRow = memo(({ record, sessionId, readOnly, isCompleted, isGudang, cu
     const hasReturnedChanged = returnedVal !== record.returnedQuantity;
 
     if (anyFilled || hasReturnedChanged) {
-      updateRecord.mutate({
-        sessionId,
-        productId: record.productId,
-        actualStock: computedTotal,
-        unitValues: JSON.stringify(unitValues),
-        returnedQuantity: returnedVal,
-        countedBy: currentCounter
-      });
+      handleUnitApply();
     }
+  };
+
+  const handleUnitApply = () => {
+    const unitValues: Record<string, number> = {};
+    let anyFilled = false;
+    productUnits.forEach(u => {
+      const val = parseFloat(unitInputs[u.unitName] || "0");
+      if (!isNaN(val) && val > 0) {
+        unitValues[u.unitName] = val;
+        anyFilled = true;
+      }
+    });
+
+    const returnedVal = parseInt(returned) || 0;
+    
+    updateRecord.mutate({
+      sessionId,
+      productId: record.productId,
+      actualStock: computedTotal,
+      unitValues: JSON.stringify(unitValues),
+      returnedQuantity: returnedVal,
+      countedBy: currentCounter
+    }, {
+      onSuccess: () => {
+        setIsFocused(false);
+      }
+    });
   };
 
   const [refPhotoOpen, setRefPhotoOpen] = useState(false);
@@ -1209,9 +1274,21 @@ const RecordRow = memo(({ record, sessionId, readOnly, isCompleted, isGudang, cu
                 onChange={(e) => setActual(e.target.value)}
                 onFocus={() => setIsFocused(true)}
                 onBlur={handleBlur}
+                onKeyDown={(e) => e.key === 'Enter' && handleApply()}
                 disabled={updateRecord.isPending}
                 data-testid={`input-count-${record.productId}`}
               />
+              {!readOnly && (
+                <Button 
+                  size="icon" 
+                  variant={actual !== "" && parseInt(actual) !== record.actualStock ? "default" : "ghost"}
+                  className="ml-2 bg-emerald-600 hover:bg-emerald-700 text-white shrink-0 h-10 w-10 rounded-xl"
+                  onClick={handleApply}
+                  disabled={updateRecord.isPending}
+                >
+                  {updateRecord.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckSquare className="w-5 h-5" />}
+                </Button>
+              )}
             </div>
           )}
         </td>
@@ -1334,6 +1411,7 @@ const RecordRow = memo(({ record, sessionId, readOnly, isCompleted, isGudang, cu
         initialIndex={lightboxIndex}
         title={record.product.name}
         productId={record.productId}
+        onDelete={!readOnly && !isBackedUp && allPhotos.length > 0 ? (idx) => handleDeletePhoto(allPhotos[idx].id) : undefined}
       />
 
       <PhotoLightbox
@@ -1502,15 +1580,22 @@ const MobileRecordCard = memo(({ record, sessionId, readOnly, isCompleted, isGud
   const handleBlur = () => {
     const actualVal = parseInt(actual);
     const returnedVal = parseInt(returned) || 0;
-    if ((!isNaN(actualVal) && actualVal !== record.actualStock) || returnedVal !== record.returnedQuantity) {
-      updateRecord.mutate({
-        sessionId,
-        productId: record.productId,
-        actualStock: isNaN(actualVal) ? (record.actualStock ?? 0) : actualVal,
-        returnedQuantity: returnedVal,
-        countedBy: currentCounter
-      });
+    const hasChanged = (!isNaN(actualVal) && actualVal !== record.actualStock) || returnedVal !== record.returnedQuantity;
+    if (hasChanged) {
+      handleApply();
     }
+  };
+
+  const handleApply = () => {
+    const actualVal = parseInt(actual);
+    const returnedVal = parseInt(returned) || 0;
+    updateRecord.mutate({
+      sessionId,
+      productId: record.productId,
+      actualStock: isNaN(actualVal) ? (record.actualStock ?? 0) : actualVal,
+      returnedQuantity: returnedVal,
+      countedBy: currentCounter
+    });
   };
 
   const handleUnitBlur = () => {
@@ -1593,15 +1678,33 @@ const MobileRecordCard = memo(({ record, sessionId, readOnly, isCompleted, isGud
               <p className="text-[10px] font-bold text-primary text-center">Total: {computedTotal.toLocaleString("id-ID")}</p>
             </div>
           ) : (
-            <Input
-              type="number"
-              className={cn("h-10 text-center font-bold text-lg", actual !== "" ? "bg-primary/5 border-primary/30 text-primary" : "bg-muted/10")}
-              placeholder="-"
-              value={actual}
-              onChange={(e) => setActual(e.target.value)}
-              onBlur={handleBlur}
-              disabled={readOnly}
-            />
+            <div className="flex items-center gap-2">
+              <Input
+                type="number"
+                className={cn("h-10 text-center font-bold text-lg flex-1", actual !== "" ? "bg-primary/5 border-primary/30 text-primary" : "bg-muted/10")}
+                placeholder="-"
+                value={actual}
+                onChange={(e) => setActual(e.target.value)}
+                onFocus={(e) => e.target.select()}
+                onBlur={handleBlur}
+                disabled={readOnly}
+              />
+              {!readOnly && (
+                <Button
+                  size="icon"
+                  className={cn(
+                    "h-10 w-10 rounded-xl shrink-0 transition-all",
+                    actual !== "" && parseInt(actual) !== record.actualStock 
+                      ? "bg-emerald-600 text-white shadow-lg shadow-emerald-200" 
+                      : "bg-muted/20 text-muted-foreground"
+                  )}
+                  onClick={handleApply}
+                  disabled={updateRecord.isPending}
+                >
+                  {updateRecord.isPending ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckSquare className="w-5 h-5" />}
+                </Button>
+              )}
+            </div>
           )}
         </div>
         {isCompleted && (
@@ -1694,6 +1797,21 @@ const MobileRecordCard = memo(({ record, sessionId, readOnly, isCompleted, isGud
         initialIndex={lightboxIndex}
         title={record.product.name}
         productId={record.productId}
+        onDelete={!readOnly && !isBackedUp && allPhotos.length > 0 ? (idx) => {
+          deletePhoto.mutate({ 
+            sessionId, 
+            productId: record.productId, 
+            photoId: allPhotos[idx].id 
+          }, {
+            onSuccess: () => {
+              if (allPhotos.length <= 1) {
+                setLightboxOpen(false);
+              } else {
+                // Adjustment for current index if last item deleted
+              }
+            }
+          });
+        } : undefined}
       />
 
       <BatchPhotoUpload

@@ -92,6 +92,7 @@ export const opnameSessions = pgTable("opname_sessions", {
   gDriveUrl: text("g_drive_url"),
   backupStatus: text("backup_status", { enum: ["none", "pending", "moved", "verified"] }).default("none").notNull(),
   backupLogs: text("backup_logs"),
+  branchId: integer("branch_id"),
 });
 
 export const opnameRecords = pgTable("opname_records", {
@@ -160,6 +161,15 @@ export const branches = pgTable("branches", {
   name: text("name").notNull(),
   address: text("address"),
   active: integer("active").default(1).notNull(),
+});
+
+export const activityLogs = pgTable("activity_logs", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  branchId: integer("branch_id"),
+  action: text("action").notNull(), // LOGIN, START_OPNAME, COMPLETE_OPNAME, UPDATE_STOCK
+  details: text("details"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 // === Inbound (Barang Masuk) ===
@@ -390,7 +400,7 @@ export const vouchers = pgTable("vouchers", {
 
 export const settings = pgTable("settings", {
   id: serial("id").primaryKey(),
-  storeName: text("store_name").default("Stockify Shop").notNull(),
+  storeName: text("store_name").default("Kazana Shop").notNull(),
   storeAddress: text("store_address"),
   storePhone: text("store_phone"),
   storeLogo: text("store_logo"),
@@ -642,6 +652,7 @@ export const insertVoucherSchema = createInsertSchema(vouchers).omit({ id: true,
 export const insertSettingsSchema = createInsertSchema(settings).omit({ id: true, updatedAt: true });
 export const insertCategorySchema = createInsertSchema(categories).omit({ id: true, createdAt: true });
 export const insertUnitSchema = createInsertSchema(units).omit({ id: true, createdAt: true });
+export const insertActivityLogSchema = createInsertSchema(activityLogs).omit({ id: true, createdAt: true });
 
 // === Types ===
 
@@ -722,6 +733,8 @@ export type Category = typeof categories.$inferSelect;
 export type InsertCategory = z.infer<typeof insertCategorySchema>;
 export type Unit = typeof units.$inferSelect;
 export type InsertUnit = z.infer<typeof insertUnitSchema>;
+export type ActivityLog = typeof activityLogs.$inferSelect;
+export type InsertActivityLog = z.infer<typeof insertActivityLogSchema>;
 export type InsertPosRegistrationCode = typeof posRegistrationCodes.$inferInsert;
 export type InboundItemPhoto = typeof inboundItemPhotos.$inferSelect;
 export type OutboundItemPhoto = typeof outboundItemPhotos.$inferSelect;

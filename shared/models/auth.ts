@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, jsonb, pgTable, timestamp, varchar } from "drizzle-orm/pg-core";
+import { index, jsonb, pgTable, timestamp, varchar, integer } from "drizzle-orm/pg-core";
 
 export const sessions = pgTable(
   "sessions",
@@ -25,6 +25,7 @@ export const users = pgTable("users", {
   subscribedModules: jsonb("subscribed_modules").default(['pos']),
   gDriveRemote: varchar("g_drive_remote"),
   trialEndsAt: timestamp("trial_ends_at"),
+  branchId: integer("branch_id"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

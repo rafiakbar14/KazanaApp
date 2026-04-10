@@ -96,7 +96,7 @@ export default function PrinterTest({ open, onClose, paperSize }: PrinterTestPro
                         <div className="test-divider" />
                         
                         <div className="mt-4 text-[8px] text-slate-400">
-                            Powered by Stockify ERP v1.0
+                            Powered by Kazana ERP v1.0
                         </div>
                     </div>
                 </div>

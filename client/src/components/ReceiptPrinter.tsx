@@ -173,7 +173,7 @@ export default function ReceiptPrinter({ sale, onClose }: ReceiptPrinterProps) {
                         <div className="text-center mt-6 space-y-1">
                             <p className="font-bold">TERIMA KASIH</p>
                             <p className="text-[10px]">Barang yang sudah dibeli tidak dapat ditukar/dikembalikan</p>
-                            <p className="text-[10px] italic">Powered by Stockify POS</p>
+                            <p className="text-[10px] italic">Powered by Kazana POS</p>
                         </div>
                     </div>
                 </div>

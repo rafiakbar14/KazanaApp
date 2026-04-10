@@ -94,6 +94,55 @@ export async function registerRoutes(
     res.json({ status: "ok", message: "Server is alive", time: new Date().toISOString() });
   });
 
+  // === Activity Logs ===
+  app.get("/api/admin/logs", isAuthenticated, requireRole("admin"), async (req, res) => {
+    try {
+      const adminId = getUserId(req);
+      const branchIdStr = req.query.branchId as string;
+      const branchId = branchIdStr ? parseInt(branchIdStr) : undefined;
+      
+      const logs = await storage.getActivityLogs(adminId, branchId);
+      res.json(logs);
+    } catch (error) {
+      console.error("Fetch logs error:", error);
+      res.status(500).json({ message: "Gagal mengambil log aktivitas" });
+    }
+  });
+
+  app.post("/api/admin/user/branch", isAuthenticated, requireRole("admin"), async (req, res) => {
+    try {
+      const { userId, branchId } = req.body;
+      if (!userId || branchId === undefined) {
+        return res.status(400).json({ message: "UserId dan branchId wajib diisi" });
+      }
+
+      const adminId = getUserId(req);
+      const targetUser = await authStorage.getUser(userId);
+      if (!targetUser) {
+        return res.status(404).json({ message: "User tidak ditemukan" });
+      }
+
+      // Verifikasi bahwa user adalah anggota tim
+      if (targetUser.adminId !== adminId) {
+        return res.status(403).json({ message: "Anda hanya bisa merubah cabang anggota tim Anda" });
+      }
+
+      await authStorage.updateUser(userId, { branchId: parseInt(branchId) });
+      
+      await storage.createActivityLog({
+        userId: adminId,
+        action: "UPDATE_USER_BRANCH",
+        details: `Updated branch for user @${targetUser.username} to branch #${branchId}`,
+        branchId: targetUser.branchId || 1
+      });
+
+      res.json({ message: "Cabang user berhasil diperbarui" });
+    } catch (error) {
+      console.error("Update branch error:", error);
+      res.status(500).json({ message: "Gagal memperbarui cabang" });
+    }
+  });
+
   console.log("[server] Registering diagnostic route: /api/diag/db");
   app.get("/api/diag/db", async (req, res) => {
     const { pool } = await import("./db");
@@ -301,14 +350,7 @@ export async function registerRoutes(
     if (!ids || !Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ message: "No product IDs provided" });
     }
-    let deleted = 0;
-    for (const id of ids) {
-      const existing = await storage.getProduct(id);
-      if (existing && existing.userId === adminId) {
-        await storage.deleteProduct(id);
-        deleted++;
-      }
-    }
+    const deleted = await storage.bulkDeleteProducts(ids, adminId as string);
     res.json({ deleted });
   });
 
@@ -555,6 +597,25 @@ export async function registerRoutes(
     }
   });
 
+  app.delete(api.recordPhotos.delete.path, isAuthenticated, async (req, res) => {
+    try {
+      const sessionId = Number(req.params.sessionId);
+      const photoId = Number(req.params.photoId);
+      const adminId = await getTeamAdminId(req);
+
+      const session = await storage.getSession(sessionId);
+      if (!session || session.userId !== adminId) {
+        return res.status(404).json({ message: "Session not found" });
+      }
+
+      await storage.deleteRecordPhoto(photoId);
+      res.sendStatus(204);
+    } catch (err) {
+      console.error("Delete record photo error:", err);
+      res.status(500).json({ message: "Failed to delete photo" });
+    }
+  });
+
   app.post(api.inbound.uploadPhoto.path, isAuthenticated, upload.single("photo"), async (req, res) => {
     try {
       const { sessionId, itemId } = req.params;
@@ -704,7 +765,8 @@ export async function registerRoutes(
     if (role === "stock_counter_toko") effectiveLocationType = "toko";
     if (role === "stock_counter_gudang") effectiveLocationType = "gudang";
 
-    const sessions = await storage.getSessions(adminId, effectiveLocationType);
+    const user = await authStorage.getUser(getUserId(req));
+    const sessions = await storage.getSessions(adminId, effectiveLocationType, user?.branchId || undefined);
     const threeDaysAgo = new Date();
     threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
 
@@ -728,7 +790,20 @@ export async function registerRoutes(
     try {
       const input = api.sessions.create.input.parse(req.body);
       const adminId = await getTeamAdminId(req);
-      const session = await storage.createSession({ ...input, userId: adminId });
+      const user = await authStorage.getUser(getUserId(req));
+      const session = await storage.createSession({ 
+        ...input, 
+        userId: adminId,
+        branchId: user?.branchId || null
+      });
+      
+      await storage.createActivityLog({
+        userId: user!.id,
+        branchId: user?.branchId,
+        action: "START_OPNAME",
+        details: `Started opname session: ${input.title}`,
+      });
+
       res.status(201).json(session);
     } catch (err) {
       if (err instanceof z.ZodError) {
@@ -841,6 +916,16 @@ export async function registerRoutes(
       return res.status(404).json({ message: 'Session not found' });
     }
     const completed = await storage.completeSession(Number(req.params.id));
+    
+    // Log activity
+    const user = await authStorage.getUser(getUserId(req));
+    await storage.createActivityLog({
+      userId: user!.id,
+      branchId: user?.branchId,
+      action: "COMPLETE_OPNAME",
+      details: `Completed opname session: ${session.title}`,
+    }).catch(err => console.error("Failed to log session completion:", err));
+
     res.json(completed);
   });
 
@@ -1866,7 +1951,7 @@ export async function registerRoutes(
     try {
       const adminId = await getTeamAdminId(req);
       const s = await storage.getSettings(adminId);
-      res.json(s || { storeName: "Stockify Shop" });
+      res.json(s || { storeName: "Kazana Shop" });
     } catch (err) {
       res.status(500).json({ message: "Gagal mengambil pengaturan toko" });
     }

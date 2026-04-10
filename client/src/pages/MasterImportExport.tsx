@@ -20,7 +20,7 @@ export default function MasterImportExport() {
       const ws = XLSX.utils.json_to_sheet(products);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Products");
-      XLSX.writeFile(wb, "Stockify_Master_Products.xlsx");
+      XLSX.writeFile(wb, "Kazana_Master_Products.xlsx");
       toast({ title: "Export Berhasil", description: "Data master produk telah diunduh." });
     } catch (err) {
       toast({ title: "Export Gagal", description: "Terjadi kesalahan saat mengekspor data.", variant: "destructive" });
@@ -36,7 +36,7 @@ export default function MasterImportExport() {
       const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(products, null, 2));
       const downloadAnchorNode = document.createElement('a');
       downloadAnchorNode.setAttribute("href", dataStr);
-      downloadAnchorNode.setAttribute("download", "Stockify_Master_Data.json");
+      downloadAnchorNode.setAttribute("download", "Kazana_Master_Data.json");
       document.body.appendChild(downloadAnchorNode);
       downloadAnchorNode.click();
       downloadAnchorNode.remove();
