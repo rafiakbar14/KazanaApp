@@ -321,17 +321,35 @@ export function Sidebar() {
               onClick={() => setIsOpen(false)}
             />
 
-            {visibleGroups.map(group => (
-              <NavGroup
-                key={group.label}
-                label={group.label}
-                icon={group.icon}
-                items={group.items}
-                currentLocation={location}
-                userRole={role}
-                isAdmin={isAdmin}
-              />
-            ))}
+            {role?.startsWith("stock_counter") ? (
+              // Flat navigation for Stock Counters (No Dropdowns)
+              visibleGroups
+                .filter(g => g.module === "inventory")
+                .flatMap(g => g.items)
+                .map((item) => (
+                  <NavItem
+                    key={item.name}
+                    name={item.name}
+                    href={item.href}
+                    icon={item.icon}
+                    isActive={location === item.href || (item.href !== "/" && location.startsWith(item.href))}
+                    onClick={() => setIsOpen(false)}
+                  />
+                ))
+            ) : (
+              // Standard Grouped navigation for Admin/Others
+              visibleGroups.map(group => (
+                <NavGroup
+                  key={group.label}
+                  label={group.label}
+                  icon={group.icon}
+                  items={group.items}
+                  currentLocation={location}
+                  userRole={role}
+                  isAdmin={isAdmin}
+                />
+              ))
+            )}
 
             {activeCount > 0 && (
               <div className="px-4 py-3 bg-white/5 border border-white/10 rounded-2xl backdrop-blur-md animate-pulse mt-4">
