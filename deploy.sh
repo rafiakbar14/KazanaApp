@@ -1,44 +1,33 @@
 #!/bin/bash
-
-# Pastikan skrip berhenti jika ada error
 set -e
 
 echo "🚀 Memulai proses deployment..."
 
-# 1. Pastikan izin skrip ini sendiri aman (opsional tapi bagus)
-chmod +x "$0"
-
-# 2. Tarik perubahan terbaru
+# 1. Tarik perubahan terbaru
 echo "📥 Menarik kode terbaru dari Git..."
 git pull origin main
 
-# 3. Instal dependensi
+# 2. Instal dependensi dan Build
 echo "📦 Menginstal dependensi..."
 npm install
-
-# 4. Build aplikasi
 echo "🏗️ Membangun aplikasi (Build)..."
 npm run build
 
-# 5. Sinkronisasi Database
-echo "🗄️ Sinkronisasi Database Schema..."
-npm run db:push || echo "⚠️ Peringatan: Sinkronisasi database gagal, cek koneksi."
+# 3. Restart Container
+echo "🐳 Merestart container Docker..."
+docker compose up -d --build
 
-# 6. Perbaiki izin folder Uploads (Penting untuk foto)
+# 4. Tunggu DB siap
+echo "⏳ Menunggu database siap..."
+sleep 5
+
+# 5. Sinkronisasi Database (DI DALAM CONTAINER)
+echo "🗄️ Sinkronisasi Database Schema..."
+docker compose exec -T app npm run db:push || echo "⚠️ Peringatan: Sinkronisasi database gagal."
+
+# 6. Perbaiki izin folder Uploads (Gunakan sudo jika perlu)
 echo "📁 Mengatur izin folder uploads..."
 mkdir -p uploads
-chmod -R 777 uploads
-
-# Opsi A: Jika pakai Docker
-if [ -f "docker-compose.yml" ]; then
-    echo "🐳 Merestart container Docker..."
-    docker compose up -d --build
-fi
-
-# Opsi B: Jika pakai PM2
-if command -v pm2 &> /dev/null && [ -f "ecosystem.config.cjs" ]; then
-    echo "🔄 Merestart aplikasi dengan PM2..."
-    pm2 reload ecosystem.config.cjs --update-env
-fi
+sudo chmod -R 777 uploads || chmod -R 777 uploads
 
 echo "✅ Deployment selesai!"
