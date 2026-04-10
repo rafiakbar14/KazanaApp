@@ -17,6 +17,10 @@ npm install
 echo "🏗️ Membangun aplikasi (Build)..."
 npm run build
 
+# 4. Sinkronisasi Database
+echo "🗄️ Sinkronisasi Database Schema..."
+npm run db:push || echo "⚠️ Peringatan: Sinkronisasi database gagal, cek koneksi."
+
 # Opsi A: Jika pakai Docker
 if [ -f "docker-compose.yml" ]; then
     echo "🐳 Merestart container Docker..."
