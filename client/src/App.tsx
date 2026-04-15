@@ -7,12 +7,14 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Sidebar } from "@/components/Sidebar";
 import { useAuth } from "@/hooks/use-auth";
 import { useAnnouncements } from "@/hooks/use-announcements";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import Dashboard from "@/pages/Dashboard";
 import Products from "@/pages/Products";
 import Sessions from "@/pages/Sessions";
 import SessionDetail from "@/pages/SessionDetail";
 import RoleManagement from "@/pages/RoleManagement";
 import ActivityLogs from "@/pages/ActivityLogs";
+import SessionHub from "@/pages/SessionHub";
 import InboundSessions from "@/pages/InboundSessions";
 import InboundDetail from "@/pages/InboundDetail";
 import OutboundSessions from "@/pages/OutboundSessions";
@@ -29,8 +31,10 @@ import ProductionAI from "@/pages/ProductionAI";
 import POS from "@/pages/POS";
 import Accounts from "@/pages/accounting/Accounts";
 import Journal from "@/pages/accounting/Journal";
+import AccountingOverview from "@/pages/accounting/Overview";
 import Assets from "@/pages/accounting/Assets";
 import Reports from "@/pages/accounting/Reports";
+import InventoryValuation from "@/pages/accounting/InventoryValuation";
 import Customers from "@/pages/Customers";
 import Invoices from "@/pages/Invoices";
 import NewInvoice from "@/pages/NewInvoice";
@@ -44,9 +48,33 @@ import Units from "@/pages/Units";
 import BarcodeGenerator from "@/pages/BarcodeGenerator";
 import MasterImportExport from "@/pages/MasterImportExport";
 import SubscriptionPage from "@/pages/Subscription";
+import ReportHub from "@/pages/ReportHub";
+import BranchManagement from "@/pages/admin/BranchManagement";
+import BackupCenter from "@/pages/admin/BackupCenter";
+import StockTransfer from "@/pages/StockTransfer";
+import PurchaseOrder from "@/pages/PurchaseOrder";
+import Suppliers from "@/pages/Suppliers";
+import SalesReturns from "@/pages/SalesReturns";
+import B2BWholesale from "@/pages/B2BWholesale";
+import DemandAnalytics from "@/pages/accounting/DemandAnalytics";
+import SmartInsights from "@/pages/accounting/SmartInsights";
+import LogisticsHub from "@/pages/LogisticsHub";
+import CashLedger from "@/pages/accounting/CashLedger";
+import PettyCashReport from "@/pages/admin/PettyCashReport";
+import SaaSConsole from "@/pages/admin/SaaSConsole";
+import StockLedger from "@/pages/reports/StockLedger";
+import SalesSummary from "@/pages/reports/SalesSummary";
+import SalesItems from "@/pages/reports/SalesItems";
 import NotFound from "@/pages/not-found";
 import { BackgroundUploadProvider } from "@/components/BackgroundUpload";
+
+declare global {
+  interface Window {
+    google: any;
+  }
+}
 import { POSProvider } from "@/hooks/use-pos";
+import { BranchProvider } from "@/hooks/use-branch";
 import { Loader2, Package, AlertCircle, Info, Megaphone, ChevronLeft, ChevronRight, Monitor, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -54,6 +82,43 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Badge } from "@/components/ui/badge";
 import type { Announcement } from "@shared/schema";
 import { useRole } from "@/hooks/use-role";
+import { ProtectedRoute } from "@/components/ProtectedRoute";
+import React from "react";
+
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean; error: Error | null }> {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("APP CRASH DETECTED:", error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-50 text-center">
+          <div className="bg-white p-8 rounded-3xl shadow-2xl border border-red-100 max-w-md">
+            <div className="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6">
+              <AlertCircle className="w-8 h-8 text-red-600" />
+            </div>
+            <h1 className="text-2xl font-bold text-slate-900 mb-2">Aplikasi Terhenti</h1>
+            <p className="text-slate-600 mb-6 text-sm">Terjadi kesalahan teknis saat memuat dashboard. Harap laporkan pesan di bawah ini:</p>
+            <div className="bg-red-50 p-4 rounded-xl text-left font-mono text-xs text-red-800 overflow-auto max-h-40 mb-6 border border-red-100">
+              {this.state.error?.toString()}
+            </div>
+            <Button onClick={() => window.location.reload()} className="w-full h-12 rounded-xl font-bold">
+              Muat Ulang Halaman
+            </Button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 function LoginPage() {
   const { login, register, loginError, registerError, isLoggingIn, isRegistering } = useAuth();
@@ -439,73 +504,93 @@ function AnnouncementPopup() {
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) dismissAll(); }}>
-      <DialogContent className="sm:max-w-[500px]">
-        <DialogHeader>
+      <DialogContent className="sm:max-w-[600px] w-[95vw] max-h-[90vh] flex flex-col p-0 overflow-hidden border-none gap-0 bg-background/95 backdrop-blur-sm">
+        <DialogHeader className="p-6 pb-2 border-b bg-background/50">
           <div className="flex items-center gap-3">
-            <div className="bg-primary/10 p-2 rounded-lg">
+            <div className="bg-primary/10 p-2.5 rounded-xl">
               <Megaphone className="w-5 h-5 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
-              <DialogTitle className="text-lg">{current.title}</DialogTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">
+              <DialogTitle className="text-xl font-bold tracking-tight">{current.title}</DialogTitle>
+              <p className="text-xs text-muted-foreground font-medium mt-1 uppercase tracking-wider">
                 {new Date(current.createdAt).toLocaleDateString("id-ID", { day: "numeric", month: "long", year: "numeric" })}
               </p>
             </div>
             {activeAnnouncements.length > 1 && (
-              <Badge variant="secondary" className="no-default-hover-elevate no-default-active-elevate shrink-0" data-testid="badge-announcement-count">
-                {currentIndex + 1}/{activeAnnouncements.length}
+              <Badge variant="secondary" className="font-bold px-2.5 py-1 rounded-lg shrink-0" data-testid="badge-announcement-count">
+                {currentIndex + 1} / {activeAnnouncements.length}
               </Badge>
             )}
           </div>
         </DialogHeader>
-        <div className="py-3 space-y-3">
-          {current.imageUrl && (
-            <div className="w-full rounded-md overflow-hidden relative aspect-square">
-              <img
-                src={current.imageUrl}
-                alt=""
-                aria-hidden="true"
-                className="absolute inset-0 w-full h-full object-cover scale-110 blur-xl opacity-60"
-              />
-              <img
-                src={current.imageUrl}
-                alt={current.title}
-                className="relative w-full h-full object-contain z-10"
-                data-testid="img-announcement-popup"
-              />
+
+        <ScrollArea className="flex-1">
+          <div className="p-6 space-y-6">
+            {current.imageUrl && (
+              <div className="w-full rounded-2xl overflow-hidden relative aspect-video shadow-2xl shadow-primary/10 border border-primary/5">
+                <img
+                  src={current.imageUrl}
+                  alt=""
+                  aria-hidden="true"
+                  className="absolute inset-0 w-full h-full object-cover scale-110 blur-2xl opacity-40"
+                />
+                <img
+                  src={current.imageUrl}
+                  alt={current.title}
+                  className="relative w-full h-full object-contain z-10 transition-transform duration-500 hover:scale-105"
+                  data-testid="img-announcement-popup"
+                />
+              </div>
+            )}
+            <div className="prose prose-sm max-w-none">
+              <p className="text-base text-foreground/80 whitespace-pre-wrap leading-relaxed font-medium" data-testid="text-announcement-content">
+                {current.content}
+              </p>
             </div>
-          )}
-          <p className="text-sm text-foreground whitespace-pre-wrap leading-relaxed" data-testid="text-announcement-content">
-            {current.content}
-          </p>
-        </div>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1">
+          </div>
+        </ScrollArea>
+
+        <div className="p-4 border-t bg-background/50 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
             {activeAnnouncements.length > 1 && (
               <>
                 <Button
                   variant="outline"
                   size="icon"
+                  className="rounded-xl h-10 w-10 border-primary/10 hover:bg-primary/5 hover:text-primary transition-all active:scale-95"
                   onClick={() => setCurrentIndex((i) => Math.max(0, i - 1))}
                   disabled={currentIndex === 0}
                   data-testid="button-prev-announcement"
                 >
-                  <ChevronLeft className="w-4 h-4" />
+                  <ChevronLeft className="w-5 h-5" />
                 </Button>
+                <div className="flex gap-1">
+                  {activeAnnouncements.map((_, idx) => (
+                    <div 
+                      key={idx}
+                      className={`h-1.5 transition-all duration-300 rounded-full ${idx === currentIndex ? 'w-6 bg-primary' : 'w-1.5 bg-primary/20'}`}
+                    />
+                  ))}
+                </div>
                 <Button
                   variant="outline"
                   size="icon"
+                  className="rounded-xl h-10 w-10 border-primary/10 hover:bg-primary/5 hover:text-primary transition-all active:scale-95"
                   onClick={() => setCurrentIndex((i) => Math.min(activeAnnouncements.length - 1, i + 1))}
                   disabled={currentIndex === activeAnnouncements.length - 1}
                   data-testid="button-next-announcement"
                 >
-                  <ChevronRight className="w-4 h-4" />
+                  <ChevronRight className="w-5 h-5" />
                 </Button>
               </>
             )}
           </div>
-          <Button onClick={dismissAll} data-testid="button-dismiss-announcements">
-            Mengerti
+          <Button 
+            onClick={dismissAll} 
+            className="rounded-xl h-11 px-8 font-bold bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 transition-all active:scale-95 uppercase tracking-tight"
+            data-testid="button-dismiss-announcements"
+          >
+            Selesai
           </Button>
         </div>
       </DialogContent>
@@ -514,9 +599,15 @@ function AnnouncementPopup() {
 }
 
 function AuthenticatedApp() {
-  const { isCashier, isLoading } = useRole();
+  const { isCashier, isLoading, role } = useRole();
+  const { user } = useAuth();
   const [location, setLocation] = useLocation();
   const isPOS = location.startsWith("/pos");
+
+  useEffect(() => {
+    console.log("[App] Authenticated Client State:", { user: user?.username, role, location });
+  }, [user, role, location]);
+
 
   useEffect(() => {
     if (!isLoading && isCashier && !isPOS) {
@@ -550,11 +641,86 @@ function AuthenticatedApp() {
         <div className="max-w-7xl mx-auto">
           <Switch>
             <Route path="/" component={Dashboard} />
-            <Route path="/products" component={Products} />
+            
+            {/* Master Data & Products */}
+            <Route path="/products">
+              <ProtectedRoute allowedRoles={["admin", "sku_manager", "production", "cashier"]}>
+                <Products />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/master">
+              <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
+                <MasterData />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/master/categories">
+              <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
+                <Categories />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/master/units">
+              <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
+                <Units />
+              </ProtectedRoute>
+            </Route>
+
+            {/* Admin & Security */}
+            <Route path="/roles">
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <RoleManagement />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/session-hub">
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <SessionHub />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/admin/logs">
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <ActivityLogs />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/staff">
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <StaffManagement />
+              </ProtectedRoute>
+            </Route>
+
+            <Route path="/accounting">
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <AccountingOverview />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/accounting/accounts">
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <Accounts />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/accounting/journal">
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <Journal />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/accounting/reports">
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <Reports />
+              </ProtectedRoute>
+            </Route>
+
+            {/* Production */}
+            <Route path="/production/boms">
+              <ProtectedRoute allowedRoles={["admin", "production"]}>
+                <BOMList />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/production/ai">
+              <ProtectedRoute allowedRoles={["admin", "production"]}>
+                <ProductionAI />
+              </ProtectedRoute>
+            </Route>
+
             <Route path="/sessions" component={Sessions} />
             <Route path="/sessions/:id" component={SessionDetail} />
-            <Route path="/roles" component={RoleManagement} />
-            <Route path="/admin/logs" component={ActivityLogs} />
             <Route path="/admin/terminals" component={TerminalManagement} />
             <Route path="/admin/promotions" component={PromotionManagement} />
             <Route path="/admin/pos-sessions" component={POSSessions} />
@@ -563,28 +729,78 @@ function AuthenticatedApp() {
             <Route path="/outbound" component={OutboundSessions} />
             <Route path="/outbound/:id" component={OutboundDetail} />
             <Route path="/profile" component={Profile} />
-            <Route path="/staff" component={StaffManagement} />
             <Route path="/announcements" component={Announcements} />
             <Route path="/feedback" component={FeedbackPage} />
             <Route path="/motivation" component={MotivationPage} />
-            <Route path="/production/boms" component={BOMList} />
             <Route path="/production/boms/:id" component={BOMDetail} />
             <Route path="/production/assembly" component={AssemblySessions} />
-            <Route path="/production/ai" component={ProductionAI} />
-            <Route path="/accounting/accounts" component={Accounts} />
-            <Route path="/accounting/journal" component={Journal} />
             <Route path="/accounting/assets" component={Assets} />
-            <Route path="/accounting/reports" component={Reports} />
+            <Route path="/accounting/inventory-valuation" component={InventoryValuation} />
             <Route path="/sales/invoices" component={Invoices} />
             <Route path="/sales/invoices/new" component={NewInvoice} />
-            <Route path="/master" component={MasterData} />
-            <Route path="/master/categories" component={Categories} />
-            <Route path="/master/units" component={Units} />
             <Route path="/master/barcode" component={BarcodeGenerator} />
             <Route path="/master/import-export" component={MasterImportExport} />
+            <Route path="/reports" component={ReportHub} />
             <Route path="/reports/export" component={ReportsExport} />
+            <Route path="/reports/stock-ledger" component={StockLedger} />
+            <Route path="/reports/sales-summary" component={SalesSummary} />
+            <Route path="/reports/sales-items" component={SalesItems} />
             <Route path="/customers" component={Customers} />
             <Route path="/subscription" component={SubscriptionPage} />
+            
+            {/* Enterprise Routes */}
+            <Route path="/admin/branches">
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <BranchManagement />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/admin/backup">
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <BackupCenter />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/logistics/transfers" component={StockTransfer} />
+            <Route path="/master/suppliers">
+              <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
+                <Suppliers />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/purchasing/po">
+              <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
+                <PurchaseOrder />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/sales/returns" component={SalesReturns} />
+            <Route path="/accounting/analytics" component={DemandAnalytics} />
+            <Route path="/accounting/insights">
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <SmartInsights />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/sales/b2b">
+              <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
+                <B2BWholesale />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/logistics/hub">
+              <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
+                <LogisticsHub />
+              </ProtectedRoute>
+            </Route>
+
+            {/* Finance & Admin Extensions */}
+            <Route path="/accounting/finance">
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <CashLedger />
+              </ProtectedRoute>
+            </Route>
+            <Route path="/admin/petty-cash" component={PettyCashReport} />
+            <Route path="/admin/saas-console">
+              <ProtectedRoute allowedRoles={["admin"]}>
+                <SaaSConsole />
+              </ProtectedRoute>
+            </Route>
+
             <Route component={NotFound} />
           </Switch>
         </div>
@@ -629,10 +845,14 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <BackgroundUploadProvider>
-          <Toaster />
-          <Router />
-        </BackgroundUploadProvider>
+        <BranchProvider>
+          <BackgroundUploadProvider>
+            <Toaster />
+            <ErrorBoundary>
+              <Router />
+            </ErrorBoundary>
+          </BackgroundUploadProvider>
+        </BranchProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

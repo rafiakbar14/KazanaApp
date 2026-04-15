@@ -83,12 +83,12 @@ export function useAddInboundItem() {
     const { toast } = useToast();
 
     return useMutation({
-        mutationFn: async ({ sessionId, productId, quantityReceived, notes }: { sessionId: number; productId: number; quantityReceived: number; notes?: string }) => {
+        mutationFn: async ({ sessionId, productId, quantityReceived, notes, expiryDate }: { sessionId: number; productId: number; quantityReceived: number; notes?: string; expiryDate?: string | null }) => {
             const url = buildUrl(api.inbound.addItem.path, { sessionId });
             const res = await fetch(url, {
                 method: api.inbound.addItem.method,
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ productId, quantityReceived, notes }),
+                body: JSON.stringify({ productId, quantityReceived, notes, expiryDate }),
                 credentials: "include",
             });
 

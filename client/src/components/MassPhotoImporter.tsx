@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { CheckCircle2, XCircle, Loader2, Camera, Upload, AlertTriangle, ImageIcon } from "lucide-react";
+import { CheckCircle2, XCircle, Loader2, Camera, Upload, AlertTriangle, ImageIcon, X } from "lucide-react";
 import { useUploadProductPhoto, useProducts } from "@/hooks/use-products";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";

@@ -1,265 +1,183 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { useAccounting } from "@/hooks/use-accounting";
-import { Loader2, Plus, Trash2, AlertCircle, CheckCircle2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { api } from "@shared/routes";
+import { Loader2, BookOpen, Calendar, Search, Filter, ArrowLeft, MoreHorizontal, FileText, CheckCircle2, Clock } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { useRole } from "@/hooks/use-role";
+import { useLocation } from "wouter";
+import { cn } from "@/lib/utils";
+import { useState, useMemo } from "react";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
 
 export default function Journal() {
-  const { journal, isLoadingJournal, accounts, createJournal } = useAccounting();
-  const [isOpen, setIsOpen] = useState(false);
-  const [description, setDescription] = useState("");
-  const [reference, setReference] = useState("");
-  const [items, setItems] = useState([{ accountId: 0, debit: 0, credit: 0 }]);
+    const { isAdmin, isLoading: roleLoading } = useRole();
+    const [, setLocation] = useLocation();
+    const [search, setSearch] = useState("");
 
-  const addItem = () => setItems([...items, { accountId: 0, debit: 0, credit: 0 }]);
-  const removeItem = (index: number) => setItems(items.filter((_, i) => i !== index));
-  const updateItem = (index: number, field: string, value: any) => {
-    const newItems = [...items];
-    (newItems[index] as any)[field] = value;
-    setItems(newItems);
-  };
+    const { data: journals, isLoading: journalsLoading } = useQuery<any[]>({
+        queryKey: [api.accounting.journal.list.path],
+    });
 
-  const totalDebit = items.reduce((sum, item) => sum + (Number(item.debit) || 0), 0);
-  const totalCredit = items.reduce((sum, item) => sum + (Number(item.credit) || 0), 0);
-  const isBalanced = totalDebit === totalCredit && totalDebit > 0;
+    const formatCurrency = (valValue: any) => {
+        const val = Number(valValue);
+        return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', minimumFractionDigits: 0 }).format(val || 0);
+    };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!isBalanced) return;
+    const filteredJournals = useMemo(() => {
+        if (!journals) return [];
+        const s = search.toLowerCase();
+        return journals.filter(j => 
+            (j.description?.toLowerCase() || "").includes(s) || 
+            (j.reference?.toLowerCase() || "").includes(s)
+        ).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    }, [journals, search]);
 
-    try {
-      await createJournal({
-        description,
-        reference,
-        items: items.map(item => ({
-          ...item,
-          debit: Number(item.debit) || 0,
-          credit: Number(item.credit) || 0
-        }))
-      });
-      setIsOpen(false);
-      setDescription("");
-      setReference("");
-      setItems([{ accountId: 0, debit: 0, credit: 0 }]);
-    } catch (err) {
-      console.error(err);
+    if (roleLoading || journalsLoading) {
+        return (
+            <div className="p-12 flex justify-center h-[80vh] items-center">
+                <div className="text-center space-y-4">
+                    <Loader2 className="w-12 h-12 animate-spin text-primary mx-auto" />
+                    <p className="text-muted-foreground animate-pulse font-medium">Membuka Buku Besar...</p>
+                </div>
+            </div>
+        );
     }
-  };
 
-  if (isLoadingJournal) {
-    return <div className="flex justify-center p-10"><Loader2 className="animate-spin" /></div>;
-  }
+    if (!isAdmin) {
+        setLocation("/");
+        return null;
+    }
 
-  return (
-    <div className="space-y-6 animate-in fade-in">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900">Jurnal Umum</h1>
-          <p className="text-muted-foreground italic">Catatan rincian transaksi berbasis Double-Entry.</p>
-        </div>
-
-        <Dialog open={isOpen} onOpenChange={setIsOpen}>
-          <DialogTrigger asChild>
-            <Button className="gap-2 bg-indigo-600 hover:bg-indigo-700 shadow-md">
-              <Plus className="w-4 h-4" /> Entri Jurnal
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="sm:max-w-[700px] max-h-[90vh] overflow-y-auto">
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <DialogHeader>
-                <DialogTitle>Buat Entri Jurnal Baru</DialogTitle>
-              </DialogHeader>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="grid gap-2">
-                  <Label>Deskripsi Transaksi</Label>
-                  <Input
-                    value={description}
-                    onChange={e => setDescription(e.target.value)}
-                    placeholder="Contoh: Setoran Modal Awal"
-                    required
-                  />
+    return (
+        <div className="space-y-8 animate-enter pb-12">
+            {/* Header Section */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div className="space-y-1">
+                    <div className="flex items-center gap-2 mb-1">
+                        <Button variant="ghost" size="sm" className="h-8 px-2 -ml-2 text-muted-foreground" onClick={() => setLocation("/accounting")}>
+                            <ArrowLeft className="w-4 h-4 mr-1" />
+                            Kembali
+                        </Button>
+                    </div>
+                    <h1 className="text-4xl font-display font-black text-foreground tracking-tight">Buku Besar (General Ledger)</h1>
+                    <p className="text-muted-foreground font-medium">Daftar rekaman jurnal debit & kredit otomatis dari seluruh aktivitas bisnis.</p>
                 </div>
-                <div className="grid gap-2">
-                  <Label>Referensi (Opsional)</Label>
-                  <Input
-                    value={reference}
-                    onChange={e => setReference(e.target.value)}
-                    placeholder="Contoh: REF001"
-                  />
+                <div className="flex items-center gap-3">
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                        <Input 
+                            placeholder="Cari referensi atau deskripsi..." 
+                            className="pl-10 w-64 rounded-xl bg-white border-border/50"
+                            value={search}
+                            onChange={(e) => setSearch(e.target.value)}
+                        />
+                    </div>
+                    <Button variant="outline" className="rounded-xl border-border bg-white shadow-sm">
+                        <Filter className="w-4 h-4 mr-2" />
+                        Filter
+                    </Button>
                 </div>
-              </div>
+            </div>
 
-              <div className="space-y-2">
-                <div className="flex justify-between items-center">
-                  <Label className="font-bold">Daftar Akun & Nominal</Label>
-                  <Button type="button" variant="outline" size="sm" onClick={addItem} className="h-8 gap-1 border-indigo-200 text-indigo-700">
-                    <Plus className="w-3 h-3" /> Tambah Baris
-                  </Button>
+            {/* Ledger Table */}
+            <Card className="rounded-[2.5rem] border-border/50 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm border-collapse">
+                        <thead>
+                            <tr className="bg-muted/30 border-b border-border/50">
+                                <th className="px-6 py-4 font-black uppercase tracking-widest text-[10px] text-muted-foreground">Tanggal</th>
+                                <th className="px-6 py-4 font-black uppercase tracking-widest text-[10px] text-muted-foreground">Deskripsi & Referensi</th>
+                                <th className="px-6 py-4 font-black uppercase tracking-widest text-[10px] text-muted-foreground">Detail Akun</th>
+                                <th className="px-6 py-4 font-black uppercase tracking-widest text-[10px] text-muted-foreground text-right w-36">Debit</th>
+                                <th className="px-6 py-4 font-black uppercase tracking-widest text-[10px] text-muted-foreground text-right w-36">Kredit</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/30">
+                            {filteredJournals.map((entry) => (
+                                <JournalEntryRow key={entry.id} entry={entry} formatCurrency={formatCurrency} />
+                            ))}
+                            {filteredJournals.length === 0 && (
+                                <tr>
+                                    <td colSpan={5} className="px-6 py-20 text-center">
+                                        <div className="text-center space-y-3 opacity-20">
+                                            <BookOpen className="w-16 h-16 mx-auto" />
+                                            <p className="text-xl font-bold">Belum ada catatan jurnal.</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            )}
+                        </tbody>
+                    </table>
                 </div>
-
-                <div className="border rounded-lg overflow-hidden">
-                  <Table>
-                    <TableHeader className="bg-slate-50">
-                      <TableRow>
-                        <TableHead className="text-xs uppercase font-bold">Akun</TableHead>
-                        <TableHead className="w-[150px] text-xs uppercase font-bold">Debit (Rp)</TableHead>
-                        <TableHead className="w-[150px] text-xs uppercase font-bold">Kredit (Rp)</TableHead>
-                        <TableHead className="w-[50px]"></TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {items.map((item, index) => (
-                        <TableRow key={index} className="group">
-                          <TableCell className="p-2">
-                            <Select
-                              value={String(item.accountId)}
-                              onValueChange={(val) => updateItem(index, "accountId", Number(val))}
-                            >
-                              <SelectTrigger className="h-9 border-slate-200">
-                                <SelectValue placeholder="Pilih Akun" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {accounts.map(acc => (
-                                  <SelectItem key={acc.id} value={String(acc.id)}>
-                                    {acc.code} - {acc.name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </TableCell>
-                          <TableCell className="p-2">
-                            <Input
-                              type="number"
-                              value={item.debit}
-                              onChange={e => updateItem(index, "debit", e.target.value)}
-                              className="h-9 border-slate-200 font-mono text-sm"
-                            />
-                          </TableCell>
-                          <TableCell className="p-2">
-                            <Input
-                              type="number"
-                              value={item.credit}
-                              onChange={e => updateItem(index, "credit", e.target.value)}
-                              className="h-9 border-slate-200 font-mono text-sm"
-                            />
-                          </TableCell>
-                          <TableCell className="p-2">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => removeItem(index)}
-                              className="h-8 w-8 text-slate-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity"
-                              disabled={items.length <= 2}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-
-              <div className={cn(
-                "p-4 rounded-xl flex items-center justify-between border-2 transition-all",
-                isBalanced ? "bg-emerald-50 border-emerald-100 text-emerald-800" : "bg-red-50 border-red-100 text-red-800"
-              )}>
-                <div className="flex items-center gap-2">
-                  {isBalanced ? <CheckCircle2 className="h-5 w-5" /> : <AlertCircle className="h-5 w-5" />}
-                  <span className="font-bold text-sm">
-                    {isBalanced ? "Jurnal Seimbang (Balanced)" : "Harus Seimbang (Debit = Kredit)"}
-                  </span>
-                </div>
-                <div className="flex gap-6 text-sm">
-                  <div className="text-right">
-                    <p className="opacity-70 text-[10px] uppercase font-bold tracking-wider">Total Debit</p>
-                    <p className="font-mono font-bold">Rp {totalDebit.toLocaleString()}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="opacity-70 text-[10px] uppercase font-bold tracking-wider">Total Kredit</p>
-                    <p className="font-mono font-bold">Rp {totalCredit.toLocaleString()}</p>
-                  </div>
-                </div>
-              </div>
-
-              <DialogFooter>
-                <Button type="submit" className="w-full h-12 text-lg font-bold" disabled={!isBalanced}>
-                  Simpan Jurnal Umum
-                </Button>
-              </DialogFooter>
-            </form>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      <div className="space-y-6">
-        {journal.length === 0 ? (
-          <Card className="border-dashed border-2 py-20 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
-            <AlertCircle className="w-12 h-12 mb-4 opacity-20" />
-            <p className="font-medium italic">Belum ada catatan jurnal umum.</p>
-          </Card>
-        ) : (
-          journal.map((entry) => (
-            <Card key={entry.id} className="border-slate-200 overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-              <CardHeader className="py-4 border-b bg-slate-50/30">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <CardTitle className="text-base font-bold text-slate-800">{entry.description}</CardTitle>
-                    <p className="text-xs text-slate-500 mt-1 flex items-center gap-2">
-                      <span className="bg-slate-200 px-1.5 py-0.5 rounded font-mono font-bold text-[10px] uppercase tracking-tighter text-slate-700">REF: {entry.reference || "-"}</span>
-                      <span>|</span>
-                      <span>{format(new Date(entry.date), "dd MMMM yyyy HH:mm", { locale: id })}</span>
-                    </p>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader className="bg-slate-50/50">
-                    <TableRow>
-                      <TableHead className="w-[120px] text-[10px] uppercase font-black text-slate-400">Kode Akun</TableHead>
-                      <TableHead className="text-[10px] uppercase font-black text-slate-400">Nama Akun</TableHead>
-                      <TableHead className="text-right text-[10px] uppercase font-black text-slate-400">Debit (Rp)</TableHead>
-                      <TableHead className="text-right text-[10px] uppercase font-black text-slate-400">Kredit (Rp)</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {entry.items.map((item) => {
-                      const account = accounts.find(a => a.id === item.accountId);
-                      return (
-                        <TableRow key={item.id} className="group hover:bg-slate-50/30 transition-colors">
-                          <TableCell className="font-mono text-xs font-bold text-indigo-700">{account?.code}</TableCell>
-                          <TableCell className={cn("text-slate-700 font-medium", item.credit > 0 ? "pl-8 text-slate-500" : "")}>
-                            {item.credit > 0 && "— "} {account?.name}
-                          </TableCell>
-                          <TableCell className="text-right font-mono font-bold text-slate-900">
-                            {item.debit > 0 ? Number(item.debit).toLocaleString() : "-"}
-                          </TableCell>
-                          <TableCell className="text-right font-mono font-bold text-slate-900 text-opacity-70">
-                            {item.credit > 0 ? Number(item.credit).toLocaleString() : "-"}
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
-              </CardContent>
             </Card>
-          ))
-        )}
-      </div>
-    </div>
-  );
+        </div>
+    );
 }
 
-const cn = (...classes: any[]) => classes.filter(Boolean).join(" ");
+function JournalEntryRow({ entry, formatCurrency }: any) {
+    const dateStr = format(new Date(entry.date), "dd MMM yyyy", { locale: id });
+    const timeStr = format(new Date(entry.date), "HH:mm");
+
+    return (
+        <>
+            <tr className="bg-slate-50/30 group hover:bg-slate-50/50 transition-colors">
+                <td className="px-6 py-5 align-top">
+                    <div className="space-y-1">
+                        <div className="flex items-center gap-1.5 text-foreground font-bold">
+                            <Calendar className="w-3 h-3 text-primary" />
+                            {dateStr}
+                        </div>
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                            <Clock className="w-3 h-3" />
+                            {timeStr}
+                        </div>
+                    </div>
+                </td>
+                <td className="px-6 py-5 align-top">
+                    <div className="space-y-1">
+                        <p className="font-bold text-foreground text-base leading-tight">{entry.description}</p>
+                        <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-[9px] font-black uppercase tracking-tighter bg-white">
+                                {entry.reference}
+                            </Badge>
+                            {entry.reference?.startsWith("SALE") && (
+                                <Badge className="bg-teal-100 text-teal-700 hover:bg-teal-100 border-none text-[8px] font-black uppercase py-0 px-1.5">Auto-Sale</Badge>
+                            )}
+                        </div>
+                    </div>
+                </td>
+                <td colSpan={3} className="px-0 py-0">
+                    <table className="w-full">
+                        <tbody className="divide-y divide-border/20">
+                            {entry.items?.map((item: any, idx: number) => (
+                                <tr key={item.id} className={cn(
+                                    "border-l-4",
+                                    item.debit > 0 ? "border-indigo-500" : "border-slate-300"
+                                )}>
+                                    <td className="px-6 py-3">
+                                        <div className="flex items-center gap-2">
+                                            <span className="text-[10px] font-black text-muted-foreground w-8">{item.accountCode}</span>
+                                            <span className={cn(
+                                                "font-semibold",
+                                                item.credit > 0 && "ml-4 italic text-muted-foreground"
+                                            )}>{item.accountName}</span>
+                                        </div>
+                                    </td>
+                                    <td className="px-6 py-3 text-right w-36 font-display font-medium">
+                                        {item.debit > 0 ? formatCurrency(item.debit) : "-"}
+                                    </td>
+                                    <td className="px-6 py-3 text-right w-36 font-display font-medium">
+                                        {item.credit > 0 ? formatCurrency(item.credit) : "-"}
+                                    </td>
+                                </tr>
+                            ))}
+                        </tbody>
+                    </table>
+                </td>
+            </tr>
+        </>
+    );
+}

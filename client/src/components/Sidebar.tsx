@@ -29,7 +29,10 @@ import {
   Building2,
   BarChart3,
   Database,
-  Search
+  Search,
+  Monitor,
+  Layers,
+  Cloud
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useState, useEffect } from "react";
@@ -40,6 +43,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useBackgroundUpload } from "@/components/BackgroundUpload";
+import { BranchSwitcher } from "@/components/BranchSwitcher";
 
 interface NavItemProps {
   name: string;
@@ -148,11 +152,13 @@ export function Sidebar() {
       icon: Store,
       module: "pos",
       items: [
-        { name: "POS (Premium)", href: "/pos", icon: Store, roles: ["admin", "cashier"] },
-        { name: "Promo & Voucher", href: "/admin/promotions", icon: Sparkles, roles: ["admin"] },
-        { name: "Riwayat Shift Kasir", href: "/admin/pos-sessions", icon: Clock, roles: ["admin"] },
-        { name: "Pengaturan PIN POS", href: "/roles", icon: Shield, roles: ["admin"] },
+        { name: "Point of Sale (POS)", href: "/pos", icon: Terminal, roles: ["admin", "cashier"] },
         { name: "Invoice & Piutang", href: "/sales/invoices", icon: ClipboardList, roles: ["admin"] },
+        { name: "Retur Penjualan (RMA)", href: "/sales/returns", icon: X, roles: ["admin"] },
+        { name: "Pelanggan (CRM)", href: "/customers", icon: Users },
+        { name: "B2B & Pricing", href: "/sales/b2b", icon: Layers, roles: ["admin", "sku_manager"] },
+        { name: "Promo & Voucher", href: "/admin/promotions", icon: Sparkles, roles: ["admin"] },
+        { name: "Rekonsiliasi Kasir", href: "/session-hub", icon: Monitor, roles: ["admin"] },
       ]
     },
     {
@@ -169,7 +175,11 @@ export function Sidebar() {
       label: "Purchasing",
       icon: ShoppingBag,
       module: "inventory",
-      items: [] // Placeholder
+      items: [
+        { name: "Purchase Order (PO)", href: "/purchasing/po", icon: ShoppingBag, roles: ["admin", "sku_manager"] },
+        { name: "Barang Masuk (Inbound)", href: "/inbound", icon: Warehouse },
+        { name: "Supplier", href: "/master/suppliers", icon: Users, roles: ["admin"] },
+      ]
     },
     {
       label: "Inventory",
@@ -177,9 +187,10 @@ export function Sidebar() {
       module: "inventory",
       items: [
         ...(!isStockCounterOnly ? [{ name: "Daftar SKU", href: "/products", icon: Box }] : []),
-        { name: "Opname Stok", href: "/sessions", icon: ClipboardList },
-        { name: "Barang Masuk", href: "/inbound", icon: Warehouse },
-        { name: "Barang Keluar", href: "/outbound", icon: Truck },
+        { name: "Stock Opname", href: "/sessions", icon: ClipboardList },
+        { name: "Logistics Hub", href: "/logistics/hub", icon: LayoutDashboard, roles: ["admin", "sku_manager"] },
+        { name: "Mutasi Antar Cabang", href: "/logistics/transfers", icon: Truck },
+        { name: "Kategori & Satuan", href: "/master", icon: Database, roles: ["admin"] },
       ]
     },
     {
@@ -187,23 +198,30 @@ export function Sidebar() {
       icon: Building2,
       module: "accounting",
       items: [
-        { name: "Manajemen Aset", href: "/accounting/assets", icon: Package, roles: ["admin"] },
+        { name: "Daftar Aset", href: "/accounting/assets", icon: Package, roles: ["admin"] },
       ]
     },
     {
       label: "Finance",
       icon: Banknote,
       module: "accounting",
-      items: [] // Placeholder
+      items: [
+        { name: "Kas & Bank", href: "/accounting/finance", icon: Banknote, roles: ["admin"] },
+        { name: "Laporan Kas Kecil", href: "/admin/petty-cash", icon: ClipboardList, roles: ["admin"] },
+      ]
     },
     {
       label: "Accounting",
-      icon: BookOpen,
+      icon: BarChart3,
       module: "accounting",
       items: [
+        { name: "Ringkasan Finansial", href: "/accounting", icon: LayoutDashboard, roles: ["admin"] },
         { name: "Daftar Akun (COA)", href: "/accounting/accounts", icon: ClipboardList, roles: ["admin"] },
-        { name: "Jurnal Umum", href: "/accounting/journal", icon: BookOpen, roles: ["admin"] },
-        { name: "Laporan Keuangan", href: "/accounting/reports", icon: LayoutDashboard, roles: ["admin"] },
+        { name: "Buku Besar (Journal)", href: "/accounting/journal", icon: BookOpen, roles: ["admin"] },
+        { name: "Valuasi Persediaan", href: "/accounting/inventory-valuation", icon: Layers, roles: ["admin"] },
+        { name: "Analitik Permintaan", href: "/accounting/analytics", icon: BarChart3, roles: ["admin"] },
+        { name: "Smart Insights AI", href: "/accounting/insights", icon: Sparkles, roles: ["admin"] },
+        { name: "Laporan Keuangan", href: "/reports", icon: LayoutDashboard, roles: ["admin"] },
       ]
     },
     {
@@ -211,7 +229,9 @@ export function Sidebar() {
       icon: Database,
       module: "admin",
       items: [
-        { name: "Master Data", href: "/master", icon: Database, roles: ["admin"] },
+        { name: "Master Data Hub", href: "/master", icon: Database, roles: ["admin"] },
+        { name: "Manajemen Cabang", href: "/admin/branches", icon: Building2, roles: ["admin"] },
+        { name: "Backup Center", href: "/admin/backup", icon: Cloud, roles: ["admin"] },
       ]
     },
     {
@@ -219,7 +239,7 @@ export function Sidebar() {
       icon: BarChart3,
       module: "admin",
       items: [
-        { name: "Ekspor Laporan", href: "/reports/export", icon: Megaphone, roles: ["admin"] },
+        { name: "Report Hub", href: "/reports", icon: BarChart3, roles: ["admin"] },
       ]
     },
     {
@@ -227,10 +247,9 @@ export function Sidebar() {
       icon: UserCog,
       module: "all",
       items: [
-        { name: "User Roles", href: "/roles", icon: Shield, roles: ["admin"] },
-        { name: "Staff SO", href: "/staff", icon: Users, roles: ["admin", "sku_manager"] },
+        { name: "Hak Akses (Roles)", href: "/roles", icon: Shield, roles: ["admin"] },
         { name: "Manajemen Terminal", href: "/admin/terminals", icon: Terminal, roles: ["admin"] },
-        { name: "Pelanggan", href: "/customers", icon: Users },
+        { name: "Staff Opname", href: "/staff", icon: Users, roles: ["admin", "sku_manager"] },
         { name: "Pengumuman", href: "/announcements", icon: Megaphone, roles: ["admin"] },
         { name: "Edit Profil", href: "/profile", icon: UserCog },
         { name: "Audit Motivasi", href: "/motivation", icon: Heart, roles: ["admin"] },
@@ -242,12 +261,13 @@ export function Sidebar() {
   // Feature Flagging / Subscription filtering
   const visibleGroups = groups.filter(group => {
     if (group.module === "all") return true;
+    const subscribedModules = (user?.subscribedModules as string[]) || [];
     if (isAdmin) {
       // Admin might see everything or only what they paid for? 
       // The user said "sesuai dengan yang dia bayar", so we filter even for admins.
-      return user?.subscribedModules?.includes(group.module);
+      return subscribedModules.includes(group.module);
     }
-    return user?.subscribedModules?.includes(group.module);
+    return subscribedModules.includes(group.module);
   });
 
   const displayName = user?.firstName && user?.lastName
@@ -307,9 +327,13 @@ export function Sidebar() {
               <Package className="w-6 h-6 text-white" />
             </div>
             <div>
-              <h1 className="font-display font-bold text-xl leading-none text-white tracking-tight">Kazana</h1>
+              <h1 className="font-display font-bold text-xl leading-none text-white tracking-tight">Kazana ERP</h1>
               <p className="text-[10px] text-blue-200 mt-1.5 font-bold uppercase tracking-widest opacity-70">Inventory Pro</p>
             </div>
+          </div>
+
+          <div className="px-6 pb-4">
+            <BranchSwitcher />
           </div>
 
           <nav className="flex-1 px-4 py-4 space-y-1 mt-14 lg:mt-0 z-10 overflow-y-auto scrollbar-thin scrollbar-thumb-white/10 scrollbar-track-transparent">
@@ -349,6 +373,18 @@ export function Sidebar() {
                   isAdmin={isAdmin}
                 />
               ))
+            )}
+
+            {user?.isSuperAdmin === 1 && (
+              <div className="mt-6 pt-6 border-t border-white/10">
+                <NavItem
+                  name="SaaS Super-Console"
+                  href="/admin/saas-console"
+                  icon={Shield}
+                  isActive={location === "/admin/saas-console"}
+                  onClick={() => setIsOpen(false)}
+                />
+              </div>
             )}
 
             {activeCount > 0 && (

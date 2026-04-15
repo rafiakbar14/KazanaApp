@@ -2,9 +2,10 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { User, Loader2, AlertCircle, CheckCircle2, ImagePlus, Store } from "lucide-react";
+import { User, Loader2, AlertCircle, CheckCircle2, ImagePlus, Store, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { api } from "@shared/routes";
 import { Settings } from "@shared/schema";
@@ -63,6 +64,8 @@ export default function Profile() {
   const [storeAddress, setStoreAddress] = useState("");
   const [storePhone, setStorePhone] = useState("");
   const [storeLogo, setStoreLogo] = useState("");
+  const [fastMovingThreshold, setFastMovingThreshold] = useState(30);
+  const [slowMovingThreshold, setSlowMovingThreshold] = useState(60);
 
   useEffect(() => {
     if (settings) {
@@ -70,6 +73,8 @@ export default function Profile() {
       setStoreAddress((settings as any).storeAddress || "");
       setStorePhone((settings as any).storePhone || "");
       setStoreLogo((settings as any).storeLogo || "");
+      setFastMovingThreshold((settings as any).fastMovingThreshold || 30);
+      setSlowMovingThreshold((settings as any).slowMovingThreshold || 60);
     }
   }, [settings]);
 
@@ -119,7 +124,13 @@ export default function Profile() {
 
   const handleSaveStore = (e: React.FormEvent) => {
     e.preventDefault();
-    updateSettings.mutate({ storeName, storeAddress, storePhone });
+    updateSettings.mutate({ 
+      storeName, 
+      storeAddress, 
+      storePhone,
+      fastMovingThreshold,
+      slowMovingThreshold
+    });
   };
 
   const handleChangePassword = (e: React.FormEvent) => {
@@ -311,7 +322,42 @@ export default function Profile() {
                     placeholder="Jl. Raya Kemenangan No. 8..."
                   />
                 </div>
-                <div className="flex justify-end">
+
+                <div className="pt-4 border-t border-slate-100">
+                  <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2 uppercase tracking-widest">
+                    <History className="w-4 h-4 text-indigo-500" /> Analitik Inventaris
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Threshold Fast Moving (Hari)</label>
+                        <Badge variant="outline" className="text-[9px] bg-emerald-50 text-emerald-700 border-emerald-100 font-bold">NORMAL</Badge>
+                      </div>
+                      <Input
+                        type="number"
+                        value={fastMovingThreshold}
+                        onChange={(e) => setFastMovingThreshold(parseInt(e.target.value))}
+                        placeholder="Default: 30"
+                      />
+                      <p className="text-[9px] text-slate-400 italic font-medium">Barang yang habis terjual sebelum X hari dianggap Fast Moving.</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Threshold Dead Stock (Hari)</label>
+                        <Badge variant="outline" className="text-[9px] bg-rose-50 text-rose-700 border-rose-100 font-bold">SLOW</Badge>
+                      </div>
+                      <Input
+                        type="number"
+                        value={slowMovingThreshold}
+                        onChange={(e) => setSlowMovingThreshold(parseInt(e.target.value))}
+                        placeholder="Default: 60"
+                      />
+                      <p className="text-[9px] text-slate-400 italic font-medium">Barang yang tidak terjual lebih dari X hari dianggap Dead Stock.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-end pt-4">
                   <Button type="submit" disabled={updateSettings.isPending}>
                     {updateSettings.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                     Simpan Pengaturan Toko

@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { api } from "@shared/routes";
 import { Settings } from "@shared/schema";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { MessageCircle } from "lucide-react";
 
 interface ReceiptPrinterProps {
     sale: any;
@@ -32,6 +33,56 @@ export default function ReceiptPrinter({ sale, onClose }: ReceiptPrinterProps) {
         onClose();
     };
 
+    const handleSendWhatsApp = () => {
+        if (!sale) return;
+        
+        let message = `*Struk Belanja - ${settings?.storeName || "Kazana"}*\n`;
+        message += `No. Faktur: #${sale.id.toString().padStart(6, '0')}\n`;
+        message += `Kasir: ${sale.salespersonName || "Staff"}\n`;
+        message += `Tanggal: ${(() => {
+            try {
+                return format(new Date(sale.createdAt), "dd/MM/yy HH:mm", { locale: id });
+            } catch (e) {
+                return "--/--/-- --:--";
+            }
+        })()}\n`;
+        message += `──────────────\n`;
+        
+        if (sale.items) {
+            sale.items.forEach((item: any) => {
+                const itemName = item.product?.name || item.productName || "Produk";
+                message += `${itemName}\n${item.quantity} x ${formatCurrency(Number(item.unitPrice))}`;
+                if (item.discountAmount > 0) {
+                    message += ` (Disc: -${formatCurrency(Number(item.discountAmount))})`;
+                }
+                message += ` = ${formatCurrency(Number(item.unitPrice) * item.quantity)}\n`;
+            });
+        }
+        
+        message += `──────────────\n`;
+        const subtotal = Number(sale.totalAmount) - Number(sale.taxAmount) + Number(sale.discountAmount);
+        message += `Subtotal: *${formatCurrency(subtotal)}*\n`;
+        if (Number(sale.discountAmount) > 0) {
+            message += `Diskon: -*${formatCurrency(Number(sale.discountAmount))}*\n`;
+        }
+        message += `PPN (11%): *${formatCurrency(Number(sale.taxAmount))}*\n`;
+        message += `*Grand Total: ${formatCurrency(Number(sale.totalAmount))}*\n\n`;
+        message += `Terima Kasih atas kunjungan Anda!`;
+
+        const encodedMessage = encodeURIComponent(message);
+        
+        // Check if customer phone is available
+        const phone = sale.customer?.phone ? sale.customer.phone.replace(/\\D/g, "") : "";
+        const finalPhone = phone.startsWith("0") ? "62" + phone.substring(1) : phone;
+        
+        // If phone is available, open chat directly, else let user select contact
+        if (finalPhone) {
+            window.open(`https://wa.me/${finalPhone}?text=${encodedMessage}`, "_blank");
+        } else {
+            window.open(`https://wa.me/?text=${encodedMessage}`, "_blank");
+        }
+    };
+
     if (!sale) return null;
 
     return (
@@ -40,6 +91,12 @@ export default function ReceiptPrinter({ sale, onClose }: ReceiptPrinterProps) {
                 <div className="p-4 border-b border-white/10 flex justify-between items-center bg-white/5 no-print">
                     <h3 className="font-bold">Preview Struk</h3>
                     <div className="flex gap-2">
+                        <button
+                            onClick={handleSendWhatsApp}
+                            className="px-4 py-2 bg-emerald-500 text-white flex items-center gap-2 text-sm font-bold rounded-xl shadow-lg hover:bg-emerald-600 transition-all active:scale-95 no-print"
+                        >
+                            <MessageCircle className="w-4 h-4" /> Kirim WA
+                        </button>
                         <button
                             onClick={handlePrint}
                             className="px-6 py-2 bg-primary text-white text-sm font-bold rounded-xl shadow-lg shadow-primary/20 hover:bg-primary/90 transition-all active:scale-95"
@@ -55,25 +112,30 @@ export default function ReceiptPrinter({ sale, onClose }: ReceiptPrinterProps) {
                         <style>{`
                             @page {
                                 margin: 0;
-                                size: auto;
+                                size: ${localStorage.getItem("pos_paper_size") || "58mm"} auto;
                             }
                             @media print {
-                                body {
+                                html, body {
                                     background: white !important;
                                     margin: 0 !important;
                                     padding: 0 !important;
+                                    width: ${localStorage.getItem("pos_paper_size") || "58mm"} !important;
                                 }
                                 .no-print {
                                     display: none !important;
                                 }
                                 .receipt-print-area {
                                     visibility: visible !important;
-                                    position: static !important;
+                                    position: absolute !important;
+                                    top: 0 !important;
+                                    left: 0 !important;
                                     width: ${localStorage.getItem("pos_paper_size") || "58mm"} !important;
-                                    padding: 2mm !important;
-                                    margin: 0 auto !important;
-                                    font-size: 10px !important;
+                                    max-width: ${localStorage.getItem("pos_paper_size") || "58mm"} !important;
+                                    padding: 1mm !important;
+                                    margin: 0 !important;
+                                    font-size: 11px !important;
                                     line-height: 1.2 !important;
+                                    box-sizing: border-box !important;
                                 }
                                 .receipt-print-area * {
                                     visibility: visible !important;
@@ -84,7 +146,7 @@ export default function ReceiptPrinter({ sale, onClose }: ReceiptPrinterProps) {
                             }
                             .receipt-divider {
                                 border-top: 1px dashed #000;
-                                margin: 5px 0;
+                                margin: 4px 0;
                             }
                         `}</style>
 

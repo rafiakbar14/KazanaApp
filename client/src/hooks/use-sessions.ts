@@ -4,13 +4,14 @@ import { type OpnameSession, type OpnameSessionWithRecords } from "@shared/schem
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 
-export function useSessions(locationType?: string) {
-  const path = locationType
-    ? `${api.sessions.list.path}?locationType=${encodeURIComponent(locationType)}`
-    : api.sessions.list.path;
+export function useSessions(locationType?: string, branchId?: number | null) {
+  const params: Record<string, string | number> = {};
+  if (locationType) params.locationType = locationType;
+  if (branchId) params.branchId = branchId;
+  const path = buildUrl(api.sessions.list.path, params);
 
   return useQuery<OpnameSession[]>({
-    queryKey: [api.sessions.list.path, locationType],
+    queryKey: [api.sessions.list.path, locationType, branchId],
     queryFn: async () => {
       const res = await fetch(path, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch sessions");

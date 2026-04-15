@@ -1,4 +1,8 @@
 import "./env"; // MUST BE FIRST
+console.log("------------------------------------------");
+console.log("KAZANA SERVER STARTING...");
+console.log("ENV:", process.env.NODE_ENV);
+console.log("------------------------------------------");
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
@@ -6,8 +10,40 @@ import { createServer } from "http";
 import path from "path";
 
 
+import helmet from "helmet";
+import { rateLimit } from "express-rate-limit";
+
 const app = express();
 const httpServer = createServer(app);
+
+// === Infrastructure Hardening ===
+if (process.env.NODE_ENV === "production") {
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://accounts.google.com"],
+        connectSrc: ["'self'", "https://accounts.google.com"],
+        frameSrc: ["'self'", "https://accounts.google.com"],
+        imgSrc: ["'self'", "data:", "https:*"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+      },
+    },
+  }));
+}
+
+// Apply rate limiting (Sangat longgar di development)
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100000, 
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: "Rate limit exceeded" }
+});
+
+if (process.env.NODE_ENV === "production") {
+  app.use(limiter);
+}
 
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
 app.use("/api/uploads", express.static(path.join(process.cwd(), "uploads")));
@@ -53,11 +89,8 @@ app.use((req, res, next) => {
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
+      // Don't log full response bodies anymore to prevent sensitive data leak in production logs
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
       log(logLine);
     }
   });

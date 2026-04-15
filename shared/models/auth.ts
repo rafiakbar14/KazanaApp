@@ -26,6 +26,7 @@ export const users = pgTable("users", {
   gDriveRemote: varchar("g_drive_remote"),
   trialEndsAt: timestamp("trial_ends_at"),
   branchId: integer("branch_id"),
+  isSuperAdmin: integer("is_super_admin").default(0).notNull(),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

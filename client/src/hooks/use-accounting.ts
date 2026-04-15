@@ -1,10 +1,10 @@
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { api } from "@shared/routes";
+import { api, buildUrl } from "@shared/routes";
 import { queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Account, JournalEntry, JournalItem, FixedAsset, InsertAccount, InsertJournalEntry, InsertJournalItem, InsertFixedAsset } from "@shared/schema";
 
-export function useAccounting() {
+export function useAccounting(branchId?: number) {
   const { toast } = useToast();
 
   const accountsQuery = useQuery<Account[]>({
@@ -12,7 +12,13 @@ export function useAccounting() {
   });
 
   const journalQuery = useQuery<(JournalEntry & { items: JournalItem[] })[]>({
-    queryKey: [api.accounting.journal.list.path],
+    queryKey: [api.accounting.journal.list.path, branchId],
+    queryFn: async () => {
+      const url = buildUrl(api.accounting.journal.list.path, branchId ? { branchId } : {});
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch journal");
+      return res.json();
+    }
   });
 
   const assetsQuery = useQuery<FixedAsset[]>({
@@ -20,11 +26,23 @@ export function useAccounting() {
   });
 
   const balanceSheetQuery = useQuery<(Account & { balance: number })[]>({
-    queryKey: [api.accounting.reports.balanceSheet.path],
+    queryKey: [api.accounting.reports.balanceSheet.path, branchId],
+    queryFn: async () => {
+      const url = buildUrl(api.accounting.reports.balanceSheet.path, branchId ? { branchId } : {});
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch balance sheet");
+      return res.json();
+    }
   });
 
   const profitLossQuery = useQuery<{ totalIncome: number; totalExpense: number; netProfit: number; details: any[] }>({
-    queryKey: [api.accounting.reports.profitAndLoss.path],
+    queryKey: [api.accounting.reports.profitAndLoss.path, branchId],
+    queryFn: async () => {
+      const url = buildUrl(api.accounting.reports.profitAndLoss.path, branchId ? { branchId } : {});
+      const res = await fetch(url);
+      if (!res.ok) throw new Error("Failed to fetch P&L");
+      return res.json();
+    }
   });
 
   const createAccountMutation = useMutation({

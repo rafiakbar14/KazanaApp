@@ -1,10 +1,22 @@
-import { pgTable, text, serial, integer, timestamp, real } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, timestamp, real, customType, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
 import { users, type User } from "./models/auth";
 
 export * from "./models/auth";
+
+export const decimal = customType<{ data: number; driverData: string }>({
+  dataType() {
+    return 'numeric(15, 2)';
+  },
+  toDriver(value: number): string {
+    return value.toString();
+  },
+  fromDriver(value: string): number {
+    return Number(value);
+  },
+});
 
 export const userRoles = pgTable("user_roles", {
   id: serial("id").primaryKey(),
@@ -17,7 +29,7 @@ export const moduleSubscriptions = pgTable("module_subscriptions", {
   userId: text("user_id").notNull(),
   moduleName: text("module_name").notNull(), // e.g., 'pos', 'accounting', 'production'
   orderId: text("order_id").notNull().unique(), // e.g., MID-xxx
-  amount: real("amount").notNull(),
+  amount: decimal("amount").notNull(),
   status: text("status", { enum: ["pending", "settlement", "expire", "cancel"] }).default("pending").notNull(),
   paymentUrl: text("payment_url"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -33,17 +45,29 @@ export const products = pgTable("products", {
   productCode: text("product_code"),
   description: text("description"),
   currentStock: integer("current_stock").default(0).notNull(),
-  unitCost: real("unit_cost").default(0),
-  sellingPrice: real("selling_price").default(0),
+  unitCost: decimal("unit_cost").default(0),
+  sellingPrice: decimal("selling_price").default(0),
   photoUrl: text("photo_url"),
   userId: text("user_id").notNull(),
   locationType: text("location_type", { enum: ["toko", "gudang"] }).default("toko"),
   productType: text("product_type", { enum: ["finished_good", "raw_material", "component"] }).default("finished_good").notNull(),
   minStock: integer("min_stock").default(0).notNull(),
   isTaxable: integer("is_taxable").default(1).notNull(),
-  taxRate: real("tax_rate").default(11.0).notNull(),
+  taxRate: decimal("tax_rate").default(11.0).notNull(),
   isBundled: integer("is_bundled").default(0).notNull(),
   updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const inventoryLots = pgTable("inventory_lots", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
+  branchId: integer("branch_id").references(() => branches.id), // Where this stock is physically located
+  purchasePrice: decimal("purchase_price").notNull(),
+  initialQuantity: integer("initial_quantity").notNull(),
+  remainingQuantity: integer("remaining_quantity").notNull(),
+  inboundDate: timestamp("inbound_date").defaultNow().notNull(),
+  inboundSessionId: integer("inbound_session_id"), // Optional reference to inboundSessions.id
+  expiryDate: timestamp("expiry_date"),
 });
 
 export const categories = pgTable("categories", {
@@ -73,7 +97,7 @@ export const productUnits = pgTable("product_units", {
   id: serial("id").primaryKey(),
   productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
   unitName: text("unit_name").notNull(),
-  conversionToBase: real("conversion_to_base").default(1).notNull(),
+  conversionToBase: decimal("conversion_to_base").default(1).notNull(),
   baseUnit: text("base_unit").notNull(),
   sortOrder: integer("sort_order").default(0).notNull(),
 });
@@ -160,6 +184,8 @@ export const branches = pgTable("branches", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   address: text("address"),
+  type: text("type", { enum: ["warehouse", "store", "factory"] }).default("store").notNull(),
+  userId: text("user_id"),
   active: integer("active").default(1).notNull(),
 });
 
@@ -167,10 +193,23 @@ export const activityLogs = pgTable("activity_logs", {
   id: serial("id").primaryKey(),
   userId: text("user_id").notNull(),
   branchId: integer("branch_id"),
+  entityType: text("entity_type"), // Optional for activity logs
+  entityId: integer("entity_id"), // Optional for activity logs
   action: text("action").notNull(), // LOGIN, START_OPNAME, COMPLETE_OPNAME, UPDATE_STOCK
-  details: text("details"),
+  details: jsonb("details"), // Ubah ke jsonb agar bisa menyimpan objek dinamis (Fase 5 Stabilization)
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+export const auditLogs = pgTable("audit_logs", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  action: text("action").notNull(),
+  entityType: text("entity_type").notNull(),
+  entityId: integer("entity_id").notNull(),
+  details: jsonb("details"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 
 // === Inbound (Barang Masuk) ===
 export const inboundSessions = pgTable("inbound_sessions", {
@@ -181,6 +220,7 @@ export const inboundSessions = pgTable("inbound_sessions", {
   completedAt: timestamp("completed_at"),
   notes: text("notes"),
   userId: text("user_id").notNull(),
+  branchId: integer("branch_id").references(() => branches.id),
   senderName: text("sender_name"),
   receiverName: text("receiver_name"),
   senderSignature: text("sender_signature"),
@@ -192,6 +232,7 @@ export const inboundItems = pgTable("inbound_items", {
   sessionId: integer("session_id").references(() => inboundSessions.id).notNull(),
   productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
   quantityReceived: integer("quantity_received").notNull(),
+  expiryDate: timestamp("expiry_date"),
   notes: text("notes"),
 });
 
@@ -202,12 +243,26 @@ export const inboundItemPhotos = pgTable("inbound_item_photos", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+// === Suppliers (Vendor Management) ===
+export const suppliers = pgTable("suppliers", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(),
+  contactPerson: text("contact_person"),
+  email: text("email"),
+  phone: text("phone"),
+  address: text("address"),
+  userId: text("user_id").notNull(),
+  active: integer("active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 // === Outbound (Barang Keluar / Transfer) ===
 export const outboundSessions = pgTable("outbound_sessions", {
   id: serial("id").primaryKey(),
   title: text("title").notNull(),
   status: text("status", { enum: ["draft", "shipped", "received"] }).default("draft").notNull(),
-  toBranchId: integer("to_branch_id").references(() => branches.id),
+  fromBranchId: integer("from_branch_id").references(() => branches.id), // Origin branch
+  toBranchId: integer("to_branch_id").references(() => branches.id), // Destination branch (if transfer)
   startedAt: timestamp("started_at").defaultNow().notNull(),
   shippedAt: timestamp("shipped_at"),
   receivedAt: timestamp("received_at"),
@@ -251,16 +306,19 @@ export const bomItems = pgTable("bom_items", {
   id: serial("id").primaryKey(),
   bomId: integer("bom_id").references(() => boms.id, { onDelete: "cascade" }).notNull(),
   productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
-  quantityNeeded: real("quantity_needed").notNull(),
+  quantityNeeded: decimal("quantity_needed").notNull(),
 });
 
 export const assemblySessions = pgTable("assembly_sessions", {
   id: serial("id").primaryKey(),
   bomId: integer("bom_id").references(() => boms.id).notNull(),
-  quantityProduced: real("quantity_produced").notNull(),
+  quantityProduced: decimal("quantity_produced").notNull(),
+  laborCost: decimal("labor_cost").default(0), // Optional addition to HPP
+  overheadCost: decimal("overhead_cost").default(0), // Optional addition to HPP
   status: text("status").default("completed").notNull(),
   notes: text("notes"),
   userId: text("user_id").notNull(),
+  branchId: integer("branch_id").references(() => branches.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -268,8 +326,8 @@ export const assemblySessions = pgTable("assembly_sessions", {
 export const tieredPricing = pgTable("tiered_pricing", {
   id: serial("id").primaryKey(),
   productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
-  minQuantity: real("min_quantity").notNull(),
-  price: real("price").notNull(),
+  minQuantity: decimal("min_quantity").notNull(),
+  price: decimal("price").notNull(),
   userId: text("user_id").notNull(),
 });
 
@@ -277,7 +335,7 @@ export const productBundles = pgTable("product_bundles", {
   id: serial("id").primaryKey(),
   parentProductId: integer("parent_product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
   childProductId: integer("child_product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
-  quantity: real("quantity").notNull(),
+  quantity: decimal("quantity").notNull(),
 });
 
 // === CRM & Sales (POS) ===
@@ -288,6 +346,7 @@ export const customers = pgTable("customers", {
   email: text("email"),
   points: integer("points").default(0).notNull(),
   userId: text("user_id").notNull(),
+  branchId: integer("branch_id").references(() => branches.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -296,9 +355,9 @@ export const sales = pgTable("sales", {
   uuid: text("uuid").notNull(),
   invoiceNumber: text("invoice_number").unique(),
   customerId: integer("customer_id").references(() => customers.id),
-  totalAmount: real("total_amount").notNull(),
-  discountAmount: real("discount_amount").default(0).notNull(),
-  taxAmount: real("tax_amount").default(0).notNull(),
+  totalAmount: decimal("total_amount").notNull(),
+  discountAmount: decimal("discount_amount").default(0).notNull(),
+  taxAmount: decimal("tax_amount").default(0).notNull(),
   paymentMethod: text("payment_method").notNull(), // cash, transfer, qris
   paymentStatus: text("payment_status").notNull(), // paid, pending, partial, overdue
   notes: text("notes"),
@@ -311,6 +370,8 @@ export const sales = pgTable("sales", {
   voidedBy: text("voided_by"),
   sessionId: integer("session_id").references(() => posSessions.id),
   voucherId: integer("voucher_id").references(() => vouchers.id),
+  pointsRedeemed: integer("points_redeemed").default(0).notNull(),
+  pointsValueRedeemed: decimal("points_value_redeemed").default(0).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -318,7 +379,7 @@ export const promotions = pgTable("promotions", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
   type: text("type", { enum: ["fixed", "percentage"] }).notNull(),
-  value: real("value").notNull(),
+  value: decimal("value").notNull(),
   startTime: text("start_time"), // HH:mm
   endTime: text("end_time"),     // HH:mm
   daysOfWeek: text("days_of_week"), // 0-6 comma separated
@@ -332,10 +393,11 @@ export const saleItems = pgTable("sale_items", {
   id: serial("id").primaryKey(),
   saleId: integer("sale_id").references(() => sales.id, { onDelete: "cascade" }).notNull(),
   productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
-  quantity: real("quantity").notNull(),
-  unitPrice: real("unit_price").notNull(),
-  subtotal: real("subtotal").notNull(),
-  discountAmount: real("discount_amount").default(0).notNull(),
+  quantity: decimal("quantity").notNull(),
+  unitPrice: decimal("unit_price").notNull(),
+  subtotal: decimal("subtotal").notNull(),
+  discountAmount: decimal("discount_amount").default(0).notNull(),
+  cogs: decimal("cogs").default(0).notNull(), // Total HPP persis hasil FIFO untuk item ini
   appliedPromotionId: integer("applied_promotion_id").references(() => promotions.id),
 });
 
@@ -362,17 +424,18 @@ export const posSessions = pgTable("pos_sessions", {
   userId: text("user_id").notNull(),
   startTime: timestamp("start_time").defaultNow().notNull(),
   endTime: timestamp("end_time"),
-  openingBalance: real("opening_balance").notNull(),
-  closingBalance: real("closing_balance"),
-  actualCash: real("actual_cash"),
+  openingBalance: decimal("opening_balance").notNull(),
+  closingBalance: decimal("closing_balance"),
+  actualCash: decimal("actual_cash"),
   status: text("status", { enum: ["open", "closed"] }).default("open").notNull(),
+  branchId: integer("branch_id").references(() => branches.id),
   notes: text("notes"),
 });
 
 export const posPettyCash = pgTable("pos_petty_cash", {
   id: serial("id").primaryKey(),
   sessionId: integer("session_id").references(() => posSessions.id).notNull(),
-  amount: real("amount").notNull(),
+  amount: decimal("amount").notNull(),
   description: text("description").notNull(),
   type: text("type", { enum: ["in", "out"] }).default("out").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -390,11 +453,24 @@ export const vouchers = pgTable("vouchers", {
   id: serial("id").primaryKey(),
   code: text("code").notNull().unique(),
   type: text("type", { enum: ["fixed", "percentage"] }).notNull(),
-  value: real("value").notNull(),
-  minPurchase: real("min_purchase").default(0).notNull(),
+  value: decimal("value").notNull(),
+  minPurchase: decimal("min_purchase").default(0).notNull(),
+  maxUses: integer("max_uses").default(1).notNull(), // To prevent infinite loop, default 1 time use
+  usedCount: integer("used_count").default(0).notNull(),
   expiryDate: timestamp("expiry_date"),
   userId: text("user_id").notNull(),
   active: integer("active").default(1).notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const customerLoyaltyLedger = pgTable("customer_loyalty_ledger", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").references(() => customers.id, { onDelete: "cascade" }).notNull(),
+  pointsDelta: integer("points_delta").notNull(),
+  action: text("action", { enum: ["earned", "spent", "voided", "adjustment"] }).notNull(),
+  saleId: integer("sale_id").references(() => sales.id),
+  note: text("note"),
+  userId: text("user_id").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -405,6 +481,8 @@ export const settings = pgTable("settings", {
   storePhone: text("store_phone"),
   storeLogo: text("store_logo"),
   userId: text("user_id").notNull(),
+  fastMovingThreshold: integer("fast_moving_threshold").default(30).notNull(),
+  slowMovingThreshold: integer("slow_moving_threshold").default(60).notNull(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
@@ -433,24 +511,100 @@ export const journalItems = pgTable("journal_items", {
   id: serial("id").primaryKey(),
   entryId: integer("entry_id").references(() => journalEntries.id, { onDelete: "cascade" }).notNull(),
   accountId: integer("account_id").references(() => accounts.id).notNull(),
-  debit: real("debit").default(0).notNull(),
-  credit: real("credit").default(0).notNull(),
+  branchId: integer("branch_id").references(() => branches.id), // For Branch-specific Balance Sheets
+  debit: decimal("debit").default(0).notNull(),
+  credit: decimal("credit").default(0).notNull(),
   userId: text("user_id").notNull(),
 });
 
 export const fixedAssets = pgTable("fixed_assets", {
   id: serial("id").primaryKey(),
   name: text("name").notNull(),
-  purchasePrice: real("purchase_price").notNull(),
+  purchasePrice: decimal("purchase_price").notNull(),
   purchaseDate: timestamp("purchase_date").notNull(),
   usefulLifeMonths: integer("useful_life_months").notNull(),
-  salvageValue: real("salvage_value").default(0).notNull(),
+  salvageValue: decimal("salvage_value").default(0).notNull(),
   depreciationMethod: text("depreciation_method").default("straight_line").notNull(),
   assetAccountId: integer("asset_account_id").references(() => accounts.id),
   expenseAccountId: integer("expense_account_id").references(() => accounts.id),
   accumDeprAccountId: integer("accum_depr_account_id").references(() => accounts.id),
   userId: text("user_id").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+
+// === Phase 9: Stock Transfers ===
+export const stockTransfers = pgTable("stock_transfers", {
+  id: serial("id").primaryKey(),
+  fromBranchId: integer("from_branch_id").references(() => branches.id),
+  toBranchId: integer("to_branch_id").references(() => branches.id),
+  outboundSessionId: integer("outbound_sessions_id").references(() => outboundSessions.id),
+  inboundSessionId: integer("inbound_sessions_id").references(() => inboundSessions.id),
+  status: text("status", { enum: ["draft", "in_transit", "received", "cancelled"] }).default("draft").notNull(),
+  transferredBy: text("transferred_by").notNull(),
+  driverName: text("driver_name"),
+  receivedBy: text("received_by"),
+  notes: text("notes"),
+  userId: text("user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  receivedAt: timestamp("received_at"),
+});
+
+export const stockTransferItems = pgTable("stock_transfer_items", {
+  id: serial("id").primaryKey(),
+  transferId: integer("transfer_id").references(() => stockTransfers.id, { onDelete: "cascade" }).notNull(),
+  productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
+  quantity: integer("quantity").notNull(),
+  receivedQuantity: integer("received_quantity"),
+  notes: text("notes"),
+});
+
+// === Phase 11: Purchase Orders (Procurement) ===
+export const purchaseOrders = pgTable("purchase_orders", {
+  id: serial("id").primaryKey(),
+  poNumber: text("po_number").unique().notNull(),
+  supplierName: text("supplier_name").notNull(), // Legacy / fallback
+  supplierId: integer("supplier_id").references(() => suppliers.id),
+  expectedDate: timestamp("expected_date"),
+  status: text("status", { enum: ["draft", "sent", "partial", "completed", "cancelled"] }).default("draft").notNull(),
+  totalAmount: decimal("total_amount").notNull(),
+  notes: text("notes"),
+  userId: text("user_id").notNull(),
+  branchId: integer("branch_id").references(() => branches.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const purchaseOrderItems = pgTable("purchase_order_items", {
+  id: serial("id").primaryKey(),
+  poId: integer("po_id").references(() => purchaseOrders.id, { onDelete: "cascade" }).notNull(),
+  productId: integer("product_id").references(() => products.id).notNull(),
+  quantityOrdered: integer("quantity_ordered").notNull(),
+  quantityReceived: integer("quantity_received").default(0).notNull(),
+  unitPrice: decimal("unit_price").notNull(),
+});
+
+// === Phase 16: RMA & Sales Returns ===
+export const salesReturns = pgTable("sales_returns", {
+  id: serial("id").primaryKey(),
+  returnNumber: text("return_number").unique().notNull(),
+  saleId: integer("sale_id").references(() => sales.id).notNull(),
+  reason: text("reason").notNull(),
+  status: text("status", { enum: ["pending", "approved", "rejected", "completed"] }).default("pending").notNull(),
+  refundAmount: decimal("refund_amount").notNull(),
+  refundMethod: text("refund_method"), // cash, credit_note, original_payment
+  notes: text("notes"),
+  userId: text("user_id").notNull(), // Admin/Staff processing the return
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const salesReturnItems = pgTable("sales_return_items", {
+  id: serial("id").primaryKey(),
+  returnId: integer("return_id").references(() => salesReturns.id, { onDelete: "cascade" }).notNull(),
+  saleItemId: integer("sale_item_id").references(() => saleItems.id).notNull(),
+  productId: integer("product_id").references(() => products.id).notNull(),
+  quantityReturned: integer("quantity_returned").notNull(),
+  restockStatus: text("restock_status", { enum: ["pending", "restocked", "disposed"] }).default("pending").notNull(),
 });
 
 // === Relations ===
@@ -604,10 +758,94 @@ export const saleItemsRelations = relations(saleItems, ({ one }) => ({
   }),
 }));
 
+export const purchaseOrdersRelations = relations(purchaseOrders, ({ one, many }) => ({
+  items: many(purchaseOrderItems),
+  branch: one(branches, {
+    fields: [purchaseOrders.branchId],
+    references: [branches.id],
+  }),
+  supplier: one(suppliers, {
+    fields: [purchaseOrders.supplierId],
+    references: [suppliers.id],
+  }),
+}));
+
+export const suppliersRelations = relations(suppliers, ({ many }) => ({
+  purchaseOrders: many(purchaseOrders),
+}));
+
+export const purchaseOrderItemsRelations = relations(purchaseOrderItems, ({ one }) => ({
+  po: one(purchaseOrders, {
+    fields: [purchaseOrderItems.poId],
+    references: [purchaseOrders.id],
+  }),
+  product: one(products, {
+    fields: [purchaseOrderItems.productId],
+    references: [products.id],
+  }),
+}));
+
+export const salesReturnsRelations = relations(salesReturns, ({ one, many }) => ({
+  sale: one(sales, {
+    fields: [salesReturns.saleId],
+    references: [sales.id],
+  }),
+  items: many(salesReturnItems),
+}));
+
+export const salesReturnItemsRelations = relations(salesReturnItems, ({ one }) => ({
+  return: one(salesReturns, {
+    fields: [salesReturnItems.returnId],
+    references: [salesReturns.id],
+  }),
+  product: one(products, {
+    fields: [salesReturnItems.productId],
+    references: [products.id],
+  }),
+  saleItem: one(saleItems, {
+    fields: [salesReturnItems.saleItemId],
+    references: [saleItems.id],
+  }),
+}));
+
+export const stockTransfersRelations = relations(stockTransfers, ({ one, many }) => ({
+  items: many(stockTransferItems),
+  fromBranch: one(branches, {
+    fields: [stockTransfers.fromBranchId],
+    references: [branches.id],
+  }),
+  toBranch: one(branches, {
+    fields: [stockTransfers.toBranchId],
+    references: [branches.id],
+  }),
+}));
+
+export const stockTransferItemsRelations = relations(stockTransferItems, ({ one }) => ({
+  transfer: one(stockTransfers, {
+    fields: [stockTransferItems.transferId],
+    references: [stockTransfers.id],
+  }),
+  product: one(products, {
+    fields: [stockTransferItems.productId],
+    references: [products.id],
+  }),
+}));
+
 export const posDevicesRelations = relations(posDevices, ({ one }) => ({
   assignedUser: one(users, {
     fields: [posDevices.assignedUserId],
     references: [users.id],
+  }),
+}));
+
+export const customerLoyaltyLedgerRelations = relations(customerLoyaltyLedger, ({ one }) => ({
+  customer: one(customers, {
+    fields: [customerLoyaltyLedger.customerId],
+    references: [customers.id],
+  }),
+  sale: one(sales, {
+    fields: [customerLoyaltyLedger.saleId],
+    references: [sales.id],
   }),
 }));
 
@@ -636,6 +874,7 @@ export const insertAssemblySessionSchema = createInsertSchema(assemblySessions).
 export const insertCustomerSchema = createInsertSchema(customers).omit({ id: true, createdAt: true });
 export const insertSaleSchema = createInsertSchema(sales).omit({ id: true, createdAt: true });
 export const insertSaleItemSchema = createInsertSchema(saleItems).omit({ id: true });
+export const insertSupplierSchema = createInsertSchema(suppliers).omit({ id: true, createdAt: true });
 export const insertAccountSchema = createInsertSchema(accounts).omit({ id: true, createdAt: true });
 export const insertJournalEntrySchema = createInsertSchema(journalEntries).omit({ id: true, createdAt: true });
 export const insertJournalItemSchema = createInsertSchema(journalItems).omit({ id: true });
@@ -653,6 +892,10 @@ export const insertSettingsSchema = createInsertSchema(settings).omit({ id: true
 export const insertCategorySchema = createInsertSchema(categories).omit({ id: true, createdAt: true });
 export const insertUnitSchema = createInsertSchema(units).omit({ id: true, createdAt: true });
 export const insertActivityLogSchema = createInsertSchema(activityLogs).omit({ id: true, createdAt: true });
+export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true, createdAt: true });
+export const insertCustomerLoyaltyLedgerSchema = createInsertSchema(customerLoyaltyLedger).omit({ id: true, createdAt: true });
+
+
 
 // === Types ===
 
@@ -735,14 +978,28 @@ export type Unit = typeof units.$inferSelect;
 export type InsertUnit = z.infer<typeof insertUnitSchema>;
 export type ActivityLog = typeof activityLogs.$inferSelect;
 export type InsertActivityLog = z.infer<typeof insertActivityLogSchema>;
+export type AuditLog = typeof auditLogs.$inferSelect;
+export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+export type CustomerLoyaltyLedger = typeof customerLoyaltyLedger.$inferSelect;
+export type InsertCustomerLoyaltyLedger = z.infer<typeof insertCustomerLoyaltyLedgerSchema>;
+
 export type InsertPosRegistrationCode = typeof posRegistrationCodes.$inferInsert;
 export type InboundItemPhoto = typeof inboundItemPhotos.$inferSelect;
 export type OutboundItemPhoto = typeof outboundItemPhotos.$inferSelect;
+export type StockTransfer = typeof stockTransfers.$inferSelect;
+export type StockTransferItem = typeof stockTransferItems.$inferSelect;
+export type Supplier = typeof suppliers.$inferSelect;
+export type InsertSupplier = z.infer<typeof insertSupplierSchema>;
 export type ProductWithPhotosAndUnits = Product & { photos: ProductPhoto[]; units: ProductUnit[] };
 export type OpnameRecordWithProduct = OpnameRecord & { product: Product & { photos: ProductPhoto[]; units: ProductUnit[] }; photos: OpnameRecordPhoto[] };
 export type OpnameSessionWithRecords = OpnameSession & { records: OpnameRecordWithProduct[] };
 export type InboundSessionWithItems = InboundSession & { items: (InboundItem & { product: Product; photos: any[] })[] };
 export type OutboundSessionWithItems = OutboundSession & { items: (OutboundItem & { product: Product; photos: any[] })[]; toBranch: Branch | null };
+export type StockTransferWithItems = StockTransfer & { 
+  items: (StockTransferItem & { product: Product })[]; 
+  fromBranch: Branch | null; 
+  toBranch: Branch | null 
+};
 export type BomWithItems = Bom & { items: (BomItem & { product: Product })[]; targetProduct: Product };
 export type SaleWithItems = Sale & {
   items: (SaleItem & { product: Product })[];
@@ -751,3 +1008,6 @@ export type SaleWithItems = Sale & {
   salespersonName?: string;
 };
 export type AssemblySessionWithBOM = AssemblySession & { bom: Bom & { targetProduct: Product } };
+
+
+

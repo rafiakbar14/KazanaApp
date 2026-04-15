@@ -22,6 +22,8 @@ interface POSContextType {
     setSelectedCustomerId: (id: number | null) => void;
     discount: number;
     setDiscount: (val: number) => void;
+    pointsRedeemed: number;
+    setPointsRedeemed: (val: number) => void;
     discountType: 'fixed' | 'percentage';
     setDiscountType: (val: 'fixed' | 'percentage') => void;
     itemDiscounts: Record<number, { value: number, type: 'fixed' | 'percentage' }>;
@@ -73,6 +75,7 @@ export function POSProvider({ children }: { children: ReactNode }) {
     const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
     const [discount, setDiscount] = useState<number>(0);
     const [discountType, setDiscountType] = useState<'fixed' | 'percentage'>('fixed');
+    const [pointsRedeemed, setPointsRedeemed] = useState<number>(0);
     const [itemDiscounts, setItemDiscounts] = useState<Record<number, { value: number, type: 'fixed' | 'percentage' }>>({});
     const [paymentMethod, setPaymentMethod] = useState<string>("cash");
     const [isVerified, setIsVerified] = useState<boolean>(() => {
@@ -142,6 +145,11 @@ export function POSProvider({ children }: { children: ReactNode }) {
 
     const { data: promotions } = useQuery<any[]>({
         queryKey: [api.pos.promotions.list.path],
+        enabled: isVerified,
+    });
+
+    const { data: tieredPrices } = useQuery<TieredPricing[]>({
+        queryKey: ["/api/pricing/tiered"],
         enabled: isVerified,
     });
 
@@ -226,6 +234,7 @@ export function POSProvider({ children }: { children: ReactNode }) {
         setSelectedCustomerId(null);
         setDiscount(0);
         setAppliedVoucher(null);
+        setPointsRedeemed(0);
     };
 
     const [appliedVoucher, setAppliedVoucher] = useState<any>(null);
@@ -240,11 +249,24 @@ export function POSProvider({ children }: { children: ReactNode }) {
             let itemDiscount = 0;
             let appliedPromoId = null;
 
-            // 1. Automatic Promotion
+            // 0. Phase 12: Tiered Pricing (Bulk Discount)
+            let basePrice = price;
+            if (tieredPrices) {
+                const productTiers = tieredPrices
+                    .filter(t => t.productId === item.id)
+                    .sort((a, b) => b.minQuantity - a.minQuantity); // Largest qty first
+
+                const activeTier = productTiers.find(t => item.quantity >= t.minQuantity);
+                if (activeTier) {
+                    basePrice = Number(activeTier.price);
+                }
+            }
+
+            // 1. Automatic Promotion (Use basePrice if tiered pricing is active)
             const promo = activePromos.find(p => p.productId === item.id);
             if (promo) {
                 if (promo.type === 'percentage') {
-                    itemDiscount = price * (promo.value / 100);
+                    itemDiscount = basePrice * (promo.value / 100);
                 } else {
                     itemDiscount = promo.value;
                 }
@@ -255,21 +277,27 @@ export function POSProvider({ children }: { children: ReactNode }) {
             const manual = itemDiscounts[item.id];
             if (manual) {
                 if (manual.type === 'percentage') {
-                    itemDiscount = price * (manual.value / 100);
+                    itemDiscount = basePrice * (manual.value / 100);
                 } else {
                     itemDiscount = manual.value;
                 }
                 appliedPromoId = null; // Manual override
             }
 
-            const subtotal = (price - itemDiscount) * item.quantity;
-            itemsSubtotal += price * item.quantity;
+            // Secure item discounts (Cannot discount more than the price itself)
+            if (itemDiscount > basePrice) {
+                itemDiscount = basePrice; 
+            }
+
+            // Calculation
+            const subtotal = (basePrice - itemDiscount) * item.quantity;
+            itemsSubtotal += basePrice * item.quantity;
             itemsDiscount += itemDiscount * item.quantity;
 
-            return { ...item, itemDiscount, appliedPromoId };
+            return { ...item, basePrice, itemDiscount, appliedPromoId };
         });
 
-        const subtotalAfterItems = itemsSubtotal - itemsDiscount;
+        const subtotalAfterItems = Math.max(0, itemsSubtotal - itemsDiscount);
         const tax = subtotalAfterItems * 0.11;
 
         let billDiscount = 0;
@@ -290,16 +318,25 @@ export function POSProvider({ children }: { children: ReactNode }) {
             }
         }
 
-        const total = subtotalAfterItems + tax - billDiscount - voucherDiscount;
+        // Secure bill/voucher discounts
+        let finalDiscounts = billDiscount + voucherDiscount;
+        
+        // 3. Customer Loyalty Points Discount (Phase 17)
+        const pointsDiscount = pointsRedeemed; // 1 Poin = Rp 1
+        
+        const totalBeforePoints = subtotalAfterItems + tax - finalDiscounts;
+        const total = Math.max(0, totalBeforePoints - pointsDiscount);
+
         return {
             subtotal: itemsSubtotal,
             tax,
             total,
             itemsDiscount,
-            billDiscount: billDiscount + voucherDiscount,
+            billDiscount: finalDiscounts,
+            pointsDiscount,
             cartWithDiscounts
         };
-    }, [cart, discount, discountType, itemDiscounts, activePromos, appliedVoucher]);
+    }, [cart, discount, discountType, itemDiscounts, activePromos, appliedVoucher, pointsRedeemed]);
 
     const startSessionMutation = useMutation({
         mutationFn: async (data: { openingBalance: number, notes?: string }) => {
@@ -379,6 +416,7 @@ export function POSProvider({ children }: { children: ReactNode }) {
             queryClient.invalidateQueries({ queryKey: ["/api/products"] });
             queryClient.invalidateQueries({ queryKey: [api.pos.sales.list.path] });
             queryClient.invalidateQueries({ queryKey: [api.pos.sessions.active.path] });
+            queryClient.invalidateQueries({ queryKey: [api.pos.customers.list.path] });
             setLastSale(data);
             clearCart();
             toast({ title: "Transaksi Berhasil", description: "Pesanan telah diproses dan stok telah diperbarui." });
@@ -527,7 +565,9 @@ export function POSProvider({ children }: { children: ReactNode }) {
             paymentStatus: "paid",
             type: "pos",
             salespersonId: currentCashier?.id,
-            voucherId: appliedVoucher?.id
+            voucherId: appliedVoucher?.id,
+            pointsRedeemed: pointsRedeemed,
+            pointsValueRedeemed: totals.pointsDiscount
         },
         items: totals.cartWithDiscounts.map((item: any) => ({
             productId: item.id,
@@ -561,6 +601,8 @@ export function POSProvider({ children }: { children: ReactNode }) {
         setDiscount,
         discountType,
         setDiscountType,
+        pointsRedeemed,
+        setPointsRedeemed,
         itemDiscounts,
         updateItemDiscount,
         paymentMethod,
@@ -601,7 +643,7 @@ export function POSProvider({ children }: { children: ReactNode }) {
         cashiers,
         isLoadingCashiers
     }), [
-        cart, totals, customers, isLoadingCustomers, selectedCustomerId, discount, discountType, itemDiscounts, 
+        cart, totals, customers, isLoadingCustomers, selectedCustomerId, discount, discountType, pointsRedeemed, itemDiscounts, 
         updateItemDiscount, paymentMethod, isVerified, currentCashier, checkout, createSaleMutation.isPending,
         createCustomer, createCustomerMutation.isPending, verifyPin, verifyPinMutation.isPending, logout, 
         deviceId, currentDevice, registerDevice, registerDeviceMutation.isPending, isLoadingDevice, 

@@ -12,7 +12,7 @@ import {
   posDevices, posRegistrationCodes, promotions,
   posSessions, posPettyCash, posPendingSales, vouchers, settings,
   tieredPricing, productBundles,
-  categories, units, activityLogs,
+  categories, units, activityLogs, auditLogs, inventoryLots, customerLoyaltyLedger,
   type Product, type InsertProduct,
   type OpnameSession, type InsertOpnameSession,
   type OpnameRecord,
@@ -58,11 +58,16 @@ import {
   type Category, type InsertCategory,
   type Unit, type InsertUnit,
   type ActivityLog, type InsertActivityLog,
+  type AuditLog, type InsertAuditLog,
+  stockTransfers, stockTransferItems,
+  type StockTransfer, type InsertStockTransfer,
+  type StockTransferItem, type InsertStockTransferItem,
+  type CustomerLoyaltyLedger, type InsertCustomerLoyaltyLedger,
 } from "@shared/schema";
 import { eq, desc, and, inArray, gt, lt } from "drizzle-orm";
 
 export interface IStorage {
-  getProducts(userId: string, locationType?: string): Promise<Product[]>;
+  getProducts(userId: string, locationType?: string, branchId?: number): Promise<Product[]>;
   getProduct(id: number): Promise<Product | undefined>;
   createProduct(product: InsertProduct): Promise<Product>;
   updateProduct(id: number, product: Partial<InsertProduct>): Promise<Product>;
@@ -93,7 +98,7 @@ export interface IStorage {
   getRecordPhotos(recordId: number): Promise<OpnameRecordPhoto[]>;
   addRecordPhoto(data: { recordId: number; url: string }): Promise<OpnameRecordPhoto>;
   deleteRecordPhoto(id: number): Promise<void>;
-  deleteRecordStatusPhoto(id: number): Promise<void>; // Adding just in case for older schema
+ // Adding just in case for older schema
 
   getUserRole(userId: string): Promise<UserRole | undefined>;
   setUserRole(data: InsertUserRole): Promise<UserRole>;
@@ -151,10 +156,12 @@ export interface IStorage {
   // === POS & Sales ===
   getSales(userId: string): Promise<SaleWithItems[]>;
   getSale(id: number): Promise<SaleWithItems | undefined>;
+  deductFifoStockAndGetCogs(productId: number, quantity: number, branchId?: number): Promise<number>;
   createSale(sale: InsertSale, items: InsertSaleItem[]): Promise<SaleWithItems>;
   updateInvoiceStatus(id: number, userId: string, status: string): Promise<void>;
-  voidSale(id: number, userId: string): Promise<Sale>;
-  autoJournalVoid(saleId: number, userId: string, totalAmount: number, items: { productId: number; quantity: number; unitPrice: number }[], type: string): Promise<void>;
+  voidSale(id: number, userId: string, reason?: string): Promise<Sale>;
+  autoJournalSale(saleId: number, userId: string, totalAmount: number, totalCogs: number, type: string, taxAmount?: number, branchId?: number): Promise<void>;
+  autoJournalVoid(saleId: number, userId: string, totalAmount: number, totalCogs: number, type: string, taxAmount?: number, branchId?: number): Promise<void>;
 
   // Promotions
   getPromotions(userId: string): Promise<Promotion[]>;
@@ -162,8 +169,12 @@ export interface IStorage {
   deletePromotion(id: number): Promise<void>;
   getActivePromotions(userId: string): Promise<Promotion[]>;
 
+  // Audit Logs
+  createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
+
   getCustomers(userId: string): Promise<Customer[]>;
   getCustomersWithStats(userId: string): Promise<(Customer & { totalSpent: number; totalOrders: number; lastOrderDate: Date | null })[]>;
+  getCustomerLoyaltyHistory(customerId: number): Promise<CustomerLoyaltyLedger[]>;
   createCustomer(customer: InsertCustomer): Promise<Customer>;
   updateUserPin(userId: string, pin: string): Promise<void>;
 
@@ -226,13 +237,68 @@ export interface IStorage {
   updateUnit(id: number, data: Partial<InsertUnit>): Promise<Unit>;
   deleteUnit(id: number): Promise<void>;
 
+  // === Purchase Orders & Suppliers ===
+  getSuppliers(userId: string): Promise<Supplier[]>;
+  createSupplier(supplier: InsertSupplier): Promise<Supplier>;
+  updateSupplier(id: number, data: Partial<InsertSupplier>): Promise<Supplier>;
+  
+  getPurchaseOrders(userId: string): Promise<any[]>;
+  createPurchaseOrder(po: any, items: any[]): Promise<any>;
+  completePurchaseOrder(id: number): Promise<any>;
+
+  // === RMA & Sales Returns ===
+  createSalesReturn(returnData: any, items: any[]): Promise<any>;
+  getSalesReturns(userId: string): Promise<any[]>;
+
   // Activity Logs
   getActivityLogs(adminId: string, branchId?: number): Promise<ActivityLog[]>;
   createActivityLog(log: InsertActivityLog): Promise<ActivityLog>;
+  
+  // === Stock Transfers ===
+  getStockTransfers(userId: string): Promise<any[]>;
+  getStockTransfer(id: number): Promise<any | undefined>;
+  createStockTransfer(userId: string, transfer: InsertStockTransfer, items: InsertStockTransferItem[]): Promise<any>;
+  completeStockTransfer(id: number, receivedBy: string): Promise<any>;
+
+  // Integrity Helpers
+  checkStockIntegrity(userId: string): Promise<{ productId: number; sku: string; currentStock: number; lotStock: number; diff: number }[]>;
+
+  // === Phase 19: Analytics ===
+  getStockHealth(userId: string): Promise<{ totalItems: number; outOfStock: number; lowStock: number; healthy: number }>;
+  getTopSellingItems(userId: string, limit?: number): Promise<{ productId: number; name: string; totalQuantity: number; totalRevenue: number }[]>;
+  getCategoryPerformance(userId: string): Promise<{ category: string; totalItems: number; totalStock: number; totalValue: number; totalSales: number }[]>;
+
+  // === Phase 20: Advanced Analytics & Demand Forecasting ===
+  getInventoryDemand(userId: string): Promise<any[]>;
+  getSalesForecast(userId: string): Promise<any>;
+  getInventoryAging(userId: string): Promise<any>;
 }
 
 export class DatabaseStorage implements IStorage {
-  async getProducts(userId: string, locationType?: string): Promise<Product[]> {
+  async getProducts(userId: string, locationType?: string, branchId?: number): Promise<Product[]> {
+    const { eq, and, sql } = await import("drizzle-orm");
+
+    if (branchId) {
+      // Hitung stok per cabang secara dinamis dari LOT yang tersisa di cabang tersebut
+      const results = await db.select({
+        product: products,
+        branchStock: sql<number>`CAST(COALESCE(SUM(${inventoryLots.remainingQuantity}), 0) AS FLOAT)`
+      })
+      .from(products)
+      .leftJoin(inventoryLots, and(
+        eq(inventoryLots.productId, products.id),
+        eq(inventoryLots.branchId, branchId)
+      ))
+      .where(eq(products.userId, userId))
+      .groupBy(products.id)
+      .orderBy(products.sku);
+
+      return results.map(r => ({
+        ...r.product,
+        currentStock: Number(r.branchStock)
+      }));
+    }
+
     if (locationType) {
       return await db.select().from(products).where(and(eq(products.userId, userId), eq(products.locationType, locationType as "toko" | "gudang"))).orderBy(products.sku);
     }
@@ -246,27 +312,81 @@ export class DatabaseStorage implements IStorage {
 
   async createProduct(insertProduct: InsertProduct): Promise<Product> {
     const [product] = await db.insert(products).values(insertProduct).returning();
+    
+    await this.createActivityLog({
+      action: "CREATE",
+      entityType: "product",
+      entityId: product.id,
+      userId: insertProduct.userId,
+      details: { sku: product.sku, name: product.name }
+    });
+
     return product;
   }
 
   async updateProduct(id: number, updates: Partial<InsertProduct>): Promise<Product> {
     const [product] = await db.update(products).set(updates).where(eq(products.id, id)).returning();
+    
+    await this.createActivityLog({
+      action: "UPDATE",
+      entityType: "product",
+      entityId: product.id,
+      userId: product.userId,
+      details: { updates: Object.keys(updates) }
+    });
+
     return product;
   }
 
   async deleteProduct(id: number): Promise<void> {
-    await db.delete(products).where(eq(products.id, id));
+    const product = await this.getProduct(id);
+    if (product) {
+      await this.createActivityLog({
+        action: "DELETE",
+        entityType: "product",
+        entityId: id,
+        userId: product.userId,
+        details: { sku: product.sku, name: product.name }
+      });
+      await db.delete(products).where(eq(products.id, id));
+    }
   }
   
   async bulkDeleteProducts(ids: number[], userId: string): Promise<number> {
     const result = await db.delete(products)
       .where(and(inArray(products.id, ids), eq(products.userId, userId)))
       .returning();
+    
+    if (result.length > 0) {
+      await this.createAuditLog({
+        action: "BULK_DELETE_PRODUCTS",
+        entityType: "product",
+        entityId: 0,
+        userId: userId,
+        details: { count: result.length, ids }
+      });
+    }
+
     return result.length;
   }
 
   async bulkResetStock(ids: number[], userId: string): Promise<void> {
-    await db.update(products).set({ currentStock: 0 }).where(and(inArray(products.id, ids), eq(products.userId, userId)));
+    await db.update(products)
+      .set({ currentStock: 0 })
+      .where(and(inArray(products.id, ids), eq(products.userId, userId)));
+    
+    // Konsistensi: Reset juga inventory_lots agar stock lot jadi 0
+    await db.update(inventoryLots)
+      .set({ remainingQuantity: 0 })
+      .where(inArray(inventoryLots.productId, ids));
+
+    await this.createAuditLog({
+      action: "BULK_RESET_STOCK",
+      entityType: "product",
+      entityId: 0,
+      userId: userId,
+      details: { count: ids.length, ids }
+    });
   }
 
   async getProductsWithPhotosAndUnits(userId: string): Promise<ProductWithPhotosAndUnits[]> {
@@ -294,15 +414,7 @@ export class DatabaseStorage implements IStorage {
     await db.delete(productPhotos).where(eq(productPhotos.id, id));
   }
 
-  async deleteRecordPhoto(id: number): Promise<void> {
-    await db.delete(opnameRecordPhotos).where(eq(opnameRecordPhotos.id, id));
-  }
-  
-  async deleteRecordStatusPhoto(id: number): Promise<void> {
-    // Some older records might use a different table, but typically opnameRecordPhotos is the one.
-    // Included for safety if schema has multiple photo tables for records.
-    await db.delete(opnameRecordPhotos).where(eq(opnameRecordPhotos.id, id));
-  }
+
 
   async getProductUnits(productId: number): Promise<ProductUnit[] | any> {
     return await db.select().from(productUnits).where(eq(productUnits.productId, productId)).orderBy(productUnits.sortOrder);
@@ -377,21 +489,85 @@ export class DatabaseStorage implements IStorage {
   }
 
   async completeSession(id: number): Promise<OpnameSession> {
-    const [session] = await db.update(opnameSessions)
+    const { eq } = await import("drizzle-orm");
+
+    const [session] = await db.select().from(opnameSessions).where(eq(opnameSessions.id, id));
+    if (!session) throw new Error("Session not found");
+
+    const records = await db.select().from(opnameRecords).where(eq(opnameRecords.sessionId, id));
+    const adjustments: { type: "shrinkage" | "surplus", amount: number, productName: string, branchId?: number }[] = [];
+
+    for (const record of records) {
+      if (record.actualStock === null) continue;
+
+      const [product] = await db.select().from(products).where(eq(products.id, record.productId));
+      if (!product) continue;
+
+      const systemStock = product.currentStock;
+      const physicalStock = record.actualStock;
+      const diff = physicalStock - systemStock;
+
+      if (diff < 0) {
+        // Shrinkage (Stok Fisik < Stok Sistem)
+        // Deduct from LOTS using FIFO in the target branch
+        const lossQuantity = Math.abs(diff);
+        const totalLossCost = await this.deductFifoStockAndGetCogs(product.id, lossQuantity, session.branchId || undefined);
+        
+        adjustments.push({
+          type: "shrinkage",
+          amount: totalLossCost,
+          productName: product.name,
+          branchId: session.branchId || undefined
+        });
+      } else if (diff > 0) {
+        // Surplus (Stok Fisik > Stok Sistem)
+        // Add new LOT to this branch
+        const surplusQuantity = diff;
+        const purchasePrice = product.unitCost ? Number(product.unitCost) : 0;
+        
+        await (tx as any).insert(inventoryLots).values([{
+          productId: product.id,
+          branchId: session.branchId,
+          purchasePrice: purchasePrice.toString(),
+          initialQuantity: surplusQuantity,
+          remainingQuantity: surplusQuantity,
+          inboundDate: new Date(),
+        }]);
+
+        adjustments.push({
+          type: "surplus",
+          amount: surplusQuantity * purchasePrice,
+          productName: product.name,
+          branchId: session.branchId || undefined
+        });
+      }
+
+      // Update Product Current Stock (Cache global)
+      await db.update(products)
+        .set({ currentStock: physicalStock })
+        .where(eq(products.id, product.id));
+    }
+
+    // Process Journal Entries (Branch-Aware)
+    if (adjustments.length > 0) {
+      await this.autoJournalStockAdjustment(id, session.userId, adjustments);
+    }
+
+    // Finalize Session
+    const [updatedSession] = await db.update(opnameSessions)
       .set({ status: "completed", completedAt: new Date() })
       .where(eq(opnameSessions.id, id))
       .returning();
 
-    const records = await db.select().from(opnameRecords).where(eq(opnameRecords.sessionId, id));
-    for (const record of records) {
-      if (record.actualStock !== null) {
-        await db.update(products)
-          .set({ currentStock: record.actualStock })
-          .where(eq(products.id, record.productId));
-      }
-    }
+    // Log Activity
+    await this.createActivityLog({
+      userId: session.userId,
+      branchId: session.branchId,
+      action: "COMPLETE_OPNAME",
+      details: `Diselesaikan: ${session.title}. Penyesuaian: ${adjustments.length} item.`
+    });
 
-    return session;
+    return updatedSession;
   }
 
   async setSessionGDriveUrl(id: number, gDriveUrl: string): Promise<OpnameSession> {
@@ -637,6 +813,18 @@ export class DatabaseStorage implements IStorage {
         await db.update(products)
           .set({ currentStock: product.currentStock + item.quantityReceived })
           .where(eq(products.id, item.productId));
+
+        // FIFO: Catat lot baru untuk barang masuk dengan referensi cabang
+        await (tx as any).insert(inventoryLots).values([{
+          productId: item.productId,
+          branchId: session.branchId,
+          purchasePrice: Number(item.unitCost || 0).toString(),
+          initialQuantity: item.quantityReceived,
+          remainingQuantity: item.quantityReceived,
+          inboundDate: new Date(),
+          inboundSessionId: session.id,
+          expiryDate: item.expiryDate
+        }]);
       }
     }
 
@@ -698,30 +886,65 @@ export class DatabaseStorage implements IStorage {
   }
 
   async completeOutboundSession(id: number): Promise<OutboundSession> {
-    const [session] = await db.update(outboundSessions)
-      .set({ status: "shipped", shippedAt: new Date() })
-      .where(eq(outboundSessions.id, id))
-      .returning();
+    const { eq } = await import("drizzle-orm");
+
+    const [session] = await db.select().from(outboundSessions).where(eq(outboundSessions.id, id));
+    if (!session) throw new Error("Outbound session not found");
 
     const items = await db.select().from(outboundItems).where(eq(outboundItems.sessionId, id));
+    let totalOutboundCogs = 0;
 
-    // Update stock levels (decrement)
+    // Update stock levels using FIFO within the specific branch
     for (const item of items) {
-      const product = await this.getProduct(item.productId);
+      const [product] = await db.select().from(products).where(eq(products.id, item.productId));
       if (product) {
+        // Step 1: Deduct from LOTS using FIFO from the SOURCE BRANCH
+        const itemCogs = await this.deductFifoStockAndGetCogs(product.id, item.quantityShipped, session.fromBranchId || undefined);
+        totalOutboundCogs += itemCogs;
+
+        // Step 2: Update Product Current Stock (Global Cache)
+        const newStock = Math.max(0, product.currentStock - item.quantityShipped);
         await db.update(products)
-          .set({ currentStock: Math.max(0, product.currentStock - item.quantityShipped) })
+          .set({ currentStock: newStock })
           .where(eq(products.id, item.productId));
+      }
+    }
+
+    // Step 3: Accounting Journal (Branch-Aware)
+    if (totalOutboundCogs > 0) {
+      await this.ensureDefaultAccounts(session.userId);
+      const accountsList = await this.getAccounts(session.userId);
+      const findAcc = (code: string) => accountsList.find(a => a.code === code);
+      
+      const invAcc = findAcc("1201");
+      const outAcc = session.toBranchId ? findAcc("1201") : findAcc("5101"); 
+      
+      if (invAcc && outAcc) {
+        await this.createJournalEntry(
+          { 
+            description: `Outbound #${id} (${session.toBranchId ? "Mutasi" : "Pengeluaran"}): ${session.title}`, 
+            reference: `OUT-${id}`, 
+            userId: session.userId, 
+            date: new Date() 
+          },
+          [
+            // Credit from Origin (Decrease Asset)
+            { accountId: invAcc.id, debit: 0, credit: totalOutboundCogs, userId: session.userId, branchId: session.fromBranchId },
+            // Debit to Destination or Expense (Increase Asset or Cost)
+            { accountId: outAcc.id, debit: totalOutboundCogs, credit: 0, userId: session.userId, branchId: session.toBranchId || session.fromBranchId },
+          ]
+        );
       }
     }
 
     // Auto-create Inbound session for the destination if it's a transfer
     if (session.toBranchId) {
       const [inboundSession] = await db.insert(inboundSessions).values([{
-        title: `Kiriman: ${session.title}`,
+        title: `Kiriman Masuk: ${session.title}`,
         userId: session.userId,
+        branchId: session.toBranchId, // Masuk ke cabang tujuan
         status: "in_progress",
-        notes: `Otomatis dibuat dari Outbound #${session.id}. Harap verifikasi jumlah barang saat diterima.`,
+        notes: `Otomatis dari Outbound #${session.id} (Cabang Asal: ${session.fromBranchId ?? "Gudang Utama"}).`,
       }]).returning();
 
       for (const item of items) {
@@ -734,7 +957,21 @@ export class DatabaseStorage implements IStorage {
       }
     }
 
-    return session;
+    // Mark as shipped
+    const [updatedSession] = await db.update(outboundSessions)
+      .set({ status: "shipped", shippedAt: new Date() })
+      .where(eq(outboundSessions.id, id))
+      .returning();
+
+    // Log Activity
+    await this.createActivityLog({
+      userId: session.userId,
+      branchId: session.fromBranchId,
+      action: "COMPLETE_OUTBOUND",
+      details: `Outbound Selesai: ${session.title}. Tujuan: ${session.toBranchId ?? "Internal"}. Nilai: Rp${totalOutboundCogs.toLocaleString("id-ID")}`
+    });
+
+    return updatedSession;
   }
 
   async addOutboundItem(item: InsertOutboundItem): Promise<OutboundItem> {
@@ -788,6 +1025,164 @@ export class DatabaseStorage implements IStorage {
     return bom as unknown as BomWithItems;
   }
 
+  async getTopSellingItems(userId: string, limit: number = 5) {
+    const { sql, eq, desc } = await import("drizzle-orm");
+    
+    const results = await db.select({
+      productId: saleItems.productId,
+      name: products.name,
+      totalQuantity: sql<number>`CAST(SUM(${saleItems.quantity}) AS FLOAT)`,
+      totalRevenue: sql<number>`CAST(SUM(${saleItems.subtotal}) AS FLOAT)`,
+    })
+    .from(saleItems)
+    .innerJoin(products, eq(saleItems.productId, products.id))
+    .where(eq(products.userId, userId))
+    .groupBy(saleItems.productId, products.name)
+    .orderBy(desc(sql`SUM(${saleItems.quantity})`))
+    .limit(limit);
+
+    return results;
+  }
+
+  async getCategoryPerformance(userId: string) {
+    const { sql, eq, leftJoin } = await import("drizzle-orm");
+    
+    // Total Value uses unit_cost * current_stock
+    // Total Sales uses sum of saleItems.subtotal
+    const results = await db.select({
+      category: products.category,
+      totalItems: sql<number>`CAST(COUNT(DISTINCT ${products.id}) AS FLOAT)`,
+      totalStock: sql<number>`CAST(SUM(${products.currentStock}) AS FLOAT)`,
+      totalValue: sql<number>`CAST(SUM(${products.currentStock} * ${products.unitCost}) AS FLOAT)`,
+      totalSales: sql<number>`CAST(COALESCE(SUM(${saleItems.subtotal}), 0) AS FLOAT)`,
+    })
+    .from(products)
+    .leftJoin(saleItems, eq(products.id, saleItems.productId))
+    .where(eq(products.userId, userId))
+    .groupBy(products.category)
+    .orderBy(sql`SUM(${saleItems.subtotal}) DESC`);
+
+    return results.map(r => ({
+      ...r,
+      category: r.category || "Uncategorized"
+    }));
+  }
+
+  // === Phase 20: Advanced Analytics & Demand Forecasting ===
+  async getInventoryDemand(userId: string) {
+    const { sql, eq, and, gt } = await import("drizzle-orm");
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    // Get total sales per product for the last 30 days
+    const salesSummary = await db.select({
+      productId: saleItems.productId,
+      totalSold: sql<number>`CAST(SUM(${saleItems.quantity}) AS FLOAT)`,
+    })
+    .from(saleItems)
+    .innerJoin(sales, eq(saleItems.saleId, sales.id))
+    .where(and(eq(sales.userId, userId), gt(sales.createdAt, thirtyDaysAgo)))
+    .groupBy(saleItems.productId);
+
+    // Get all products
+    const allProducts = await db.select().from(products).where(eq(products.userId, userId));
+
+    return allProducts.map(p => {
+      const sale = salesSummary.find(s => s.productId === p.id);
+      const totalSold = sale ? Number(sale.totalSold) : 0;
+      const avgDailySales = Number((totalSold / 30).toFixed(2));
+      const daysRemaining = avgDailySales > 0 
+        ? Math.floor(p.currentStock / avgDailySales) 
+        : 9999; 
+
+      return {
+        productId: p.id,
+        name: p.name,
+        sku: p.sku,
+        currentStock: p.currentStock,
+        avgDailySales,
+        daysRemaining,
+      };
+    }).sort((a, b) => a.daysRemaining - b.daysRemaining);
+  }
+
+  async getSalesForecast(userId: string) {
+    const { sql, eq, desc } = await import("drizzle-orm");
+    
+    // Get monthly sales for the last 6 months
+    const monthlySales = await db.select({
+      month: sql<string>`TO_CHAR(${sales.createdAt}, 'YYYY-MM')`,
+      total: sql<number>`CAST(SUM(${sales.totalAmount}) AS FLOAT)`,
+    })
+    .from(sales)
+    .where(eq(sales.userId, userId))
+    .groupBy(sql`TO_CHAR(${sales.createdAt}, 'YYYY-MM')`)
+    .orderBy(desc(sql`TO_CHAR(${sales.createdAt}, 'YYYY-MM')`))
+    .limit(6);
+
+    const historical = monthlySales.reverse();
+    
+    // Simple average of last 3 values for forecast
+    const last3 = historical.slice(-3);
+    const avg = last3.length > 0 
+      ? last3.reduce((sum, m) => sum + Number(m.total), 0) / last3.length 
+      : 0;
+
+    return {
+      historical,
+      forecastNextMonth: Math.round(avg),
+    };
+  }
+
+  async getInventoryAging(userId: string) {
+    const { eq, and, gt } = await import("drizzle-orm");
+    
+    // Fetch user settings for thresholds
+    const userSettings = await this.getSettings(userId);
+    const fastThreshold = userSettings?.fastMovingThreshold ?? 30;
+    const slowThreshold = userSettings?.slowMovingThreshold ?? 60;
+
+    const lots = await db.select({
+      productId: inventoryLots.productId,
+      name: products.name,
+      qty: inventoryLots.remainingQuantity,
+      inboundDate: inventoryLots.inboundDate,
+    })
+    .from(inventoryLots)
+    .innerJoin(products, eq(inventoryLots.productId, products.id))
+    .where(and(eq(products.userId, userId), gt(inventoryLots.remainingQuantity, 0)));
+
+    const now = new Date();
+    const details = lots.map(l => {
+      const ageInDays = Math.floor((now.getTime() - new Date(l.inboundDate).getTime()) / (1000 * 60 * 60 * 24));
+      return {
+        ...l,
+        ageInDays,
+      };
+    }).sort((a, b) => b.ageInDays - a.ageInDays);
+
+    const summary = {
+      healthy: details.filter(d => d.ageInDays <= fastThreshold).length,
+      warning: details.filter(d => d.ageInDays > fastThreshold && d.ageInDays <= slowThreshold).length,
+      critical: details.filter(d => d.ageInDays > slowThreshold).length,
+      slowMovingItems: details.filter(d => d.ageInDays > slowThreshold).length,
+    };
+
+    return { details, summary };
+  }
+
+  async getStockHealth(userId: string) {
+    const { eq } = await import("drizzle-orm");
+    const allProducts = await db.select().from(products).where(eq(products.userId, userId));
+    
+    return {
+      totalItems: allProducts.length,
+      outOfStock: allProducts.filter(p => p.currentStock <= 0).length,
+      lowStock: allProducts.filter(p => p.currentStock > 0 && p.currentStock <= p.minStock).length,
+      healthy: allProducts.filter(p => p.currentStock > p.minStock).length,
+    };
+  }
+
   async createBOM(bom: InsertBom): Promise<Bom> {
     const [result] = await db.insert(boms).values(bom).returning();
     return result;
@@ -837,40 +1232,117 @@ export class DatabaseStorage implements IStorage {
   }
 
   async completeAssemblySession(id: number): Promise<AssemblySession> {
+    const { eq } = await import("drizzle-orm");
+
     const [session] = await db.select().from(assemblySessions).where(eq(assemblySessions.id, id));
     if (!session) throw new Error("Assembly session not found");
 
     const bom = await this.getBOM(session.bomId);
     if (!bom) throw new Error("BOM not found");
 
-    // Reduce material stock and increase finished product stock
+    let totalMaterialCogs = 0;
+
+    // 1. Deduct Materials using FIFO from the specific branch
     for (const item of bom.items) {
+      const neededQty = Number(item.quantityNeeded) * Number(session.quantityProduced);
+      const materialCogs = await this.deductFifoStockAndGetCogs(item.productId, neededQty, session.branchId || undefined);
+      totalMaterialCogs += materialCogs;
+
+      // Update global stock count
       const [product] = await db.select().from(products).where(eq(products.id, item.productId));
       if (product) {
-        await this.updateProduct(product.id, {
-          currentStock: (product.currentStock || 0) - (item.quantityNeeded * session.quantityProduced)
-        });
+        await db.update(products)
+          .set({ currentStock: Math.max(0, product.currentStock - neededQty) })
+          .where(eq(products.id, item.productId));
       }
     }
 
+    // 2. Calculate Final HPP (Materials + Labor + Overhead)
+    const labor = Number(session.laborCost || 0);
+    const overhead = Number(session.overheadCost || 0);
+    const totalProductionCost = totalMaterialCogs + labor + overhead;
+    const hppPerUnit = totalProductionCost / Number(session.quantityProduced);
+
+    // 3. Create Inventory Lot for the Finished Good in the target branch
     const [targetProduct] = await db.select().from(products).where(eq(products.id, bom.targetProductId));
     if (targetProduct) {
-      await this.updateProduct(targetProduct.id, {
-        currentStock: (targetProduct.currentStock || 0) + session.quantityProduced
-      });
+      await db.insert(inventoryLots).values({
+        productId: targetProduct.id,
+        branchId: session.branchId,
+        purchasePrice: hppPerUnit.toString(),
+        initialQuantity: Number(session.quantityProduced),
+        remainingQuantity: Number(session.quantityProduced),
+        inboundDate: new Date(),
+        notes: `Produksi BOM #${bom.id}: ${bom.name}`
+      } as any);
+
+      // Update global stock
+      await db.update(products)
+        .set({ currentStock: (targetProduct.currentStock || 0) + Number(session.quantityProduced) })
+        .where(eq(products.id, targetProduct.id));
+    }
+
+    // 4. Automated Journal Entry (Inventory WIP/FG)
+    await this.ensureDefaultAccounts(session.userId);
+    const accountsList = await this.getAccounts(session.userId);
+    const findAcc = (code: string) => accountsList.find(a => a.code === code);
+
+    const fgAcc = findAcc("1201"); // Finished Goods
+    const rmAcc = findAcc("1201"); // Raw Materials (Assuming same inventory account for now, but branchId keeps them distinct)
+    const allocAcc = findAcc("2103"); // Allocation account for labor/overhead
+
+    if (fgAcc && rmAcc) {
+      const journalItems = [
+        { accountId: fgAcc.id, debit: totalProductionCost, credit: 0, userId: session.userId, branchId: session.branchId },
+        { accountId: rmAcc.id, debit: 0, credit: totalMaterialCogs, userId: session.userId, branchId: session.branchId },
+      ];
+
+      if ((labor + overhead) > 0 && allocAcc) {
+        journalItems.push({ 
+           accountId: allocAcc.id, 
+           debit: 0, 
+           credit: labor + overhead, 
+           userId: session.userId, 
+           branchId: session.branchId 
+        });
+      }
+
+      await this.createJournalEntry(
+        { 
+          description: `Produksi Produk Jadi: ${targetProduct?.name || "Unknown"} x ${session.quantityProduced}`, 
+          reference: `ASM-${session.id}`, 
+          userId: session.userId, 
+          date: new Date() 
+        },
+        journalItems
+      );
     }
 
     const [updated] = await db.update(assemblySessions)
       .set({ status: "completed" })
       .where(eq(assemblySessions.id, id))
       .returning();
+    
+    // Log Activity
+    await this.createActivityLog({
+      userId: session.userId,
+      branchId: session.branchId,
+      action: "COMPLETE_PRODUCTION",
+      details: `Selesai Produksi: ${targetProduct?.name}. Qty: ${session.quantityProduced}. Total HPP: Rp${totalProductionCost.toLocaleString("id-ID")}`
+    });
+
     return updated;
   }
 
   // === POS & Sales ===
-  async getSales(userId: string): Promise<SaleWithItems[]> {
+  async getSales(userId: string, branchId?: number): Promise<SaleWithItems[]> {
+    const { eq, and } = await import("drizzle-orm");
+    const whereClause = branchId 
+      ? and(eq(sales.userId, userId), eq(sales.branchId, branchId))
+      : eq(sales.userId, userId);
+
     const result = await db.query.sales.findMany({
-      where: eq(sales.userId, userId),
+      where: whereClause,
       with: {
         items: { with: { product: true } },
         customer: true,
@@ -909,94 +1381,471 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createSale(sale: InsertSale, items: InsertSaleItem[]): Promise<SaleWithItems> {
-    let saleData = { ...sale };
+    return await db.transaction(async (tx) => {
+      let saleData = { ...sale };
+      const pointsToRedeem = sale.pointsRedeemed || 0;
+      const pointsValue = pointsToRedeem; // 1 Poin = Rp 1 (confirmed by user)
 
-    // Auto-generate invoice number for ERP sales if not provided
-    if (sale.type === "erp_invoice" && !sale.invoiceNumber) {
-      const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-      const count = await db.select().from(sales).where(eq(sales.userId, sale.userId));
-      saleData.invoiceNumber = `INV-${dateStr}-${(count.length + 1).toString().padStart(4, "0")}`;
-    }
-
-    // Ambil sessionId aktif jika tidak diberikan tapi tipe nya pos
-    if (sale.type === "pos" && !sale.sessionId) {
-      const activeSession = await this.getActivePOSSession(sale.userId);
-      if (activeSession) {
-        saleData.sessionId = activeSession.id;
+      if (sale.type === "erp_invoice" && !sale.invoiceNumber) {
+        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+        const count = await tx.select().from(sales).where(eq(sales.userId, sale.userId));
+        saleData.invoiceNumber = `INV-${dateStr}-${(count.length + 1).toString().padStart(4, "0")}`;
       }
-    }
 
-    const [newSale] = await db.insert(sales).values(saleData).returning();
+      if (sale.type === "pos" && !sale.sessionId) {
+        const activeSession = await this.getActivePOSSession(sale.userId);
+        if (activeSession) {
+          saleData.sessionId = activeSession.id;
+        }
+      }
 
-    for (const item of items) {
-      // Pastikan subtotal dihitung (qty * unitPrice - discount)
-      const subtotal = (item.quantity * item.unitPrice) - (item.discountAmount || 0);
+      // Security: Validate Voucher
+      if (sale.voucherId) {
+        const [voucher] = await tx.select().from(vouchers).where(eq(vouchers.id, sale.voucherId));
+        if (!voucher || voucher.active === 0 || voucher.usedCount >= voucher.maxUses) {
+          throw new Error("Voucher tidak valid atau sudah melampaui batas penggunaan");
+        }
+        const newUsedCount = voucher.usedCount + 1;
+        await tx.update(vouchers)
+          .set({ 
+             usedCount: newUsedCount, 
+             active: newUsedCount >= voucher.maxUses ? 0 : 1 
+          })
+          .where(eq(vouchers.id, voucher.id));
+      }
 
-      await db.insert(saleItems).values({
-        ...item,
-        saleId: newSale.id,
-        subtotal: subtotal,
-        discountAmount: item.discountAmount || 0,
-        appliedPromotionId: item.appliedPromotionId || null
+      let totalSaleCogs = 0;
+      let calculatedSubtotal = 0;
+      const validatedItems = [];
+
+      for (const item of items) {
+        if (item.quantity <= 0) {
+          throw new Error("Kuantitas produk tidak boleh kurang dari atau sama dengan nol.");
+        }
+
+        const [product] = await tx.select().from(products).where(eq(products.id, item.productId));
+        if (!product) throw new Error(`Produk dengan ID ${item.productId} tidak ditemukan`);
+
+        const expectedPrice = Number(product.sellingPrice || 0);
+        if (Math.abs(Number(item.unitPrice) - expectedPrice) > 1) { 
+           throw new Error(`Terjadi manipulasi harga pada produk ${product.name}. Harga valid: ${expectedPrice}`);
+        }
+
+        const subtotal = (item.quantity * expectedPrice) - (item.discountAmount || 0);
+        if (subtotal < 0) {
+            throw new Error(`Diskon pada produk ${product.name} melebihi harga jual.`);
+        }
+
+        calculatedSubtotal += subtotal;
+
+        await tx.update(products).set({
+          currentStock: (product.currentStock || 0) - item.quantity
+        }).where(eq(products.id, item.productId));
+
+        // Atomic FIFO Cogs derivation
+        totalSaleCogs += exactCogs;
+
+        // === Phase 12: Product Bundling (Deduct Child Stock) ===
+        const bundles = await tx.select().from(productBundles).where(eq(productBundles.parentProductId, item.productId));
+        for (const bundle of bundles) {
+            const childQty = bundle.quantity * item.quantity;
+            // Deduct child stock
+            const [childProd] = await tx.select().from(products).where(eq(products.id, bundle.childProductId));
+            if (childProd) {
+                await tx.update(products).set({
+                    currentStock: (childProd.currentStock || 0) - childQty
+                }).where(eq(products.id, childProd.id));
+                // Handle child's FIFO
+                await this.deductFifoStockAndGetCogs(childProd.id, childQty, sale.branchId || undefined, tx);
+            }
+        }
+
+        validatedItems.push({
+          ...item,
+          unitPrice: item.unitPrice, // Keep provided price as it might be Tiered
+          subtotal: subtotal,
+          cogs: exactCogs,
+        });
+      }
+
+      const finalTax = Number(sale.taxAmount || 0);
+      let finalGrandTotal = calculatedSubtotal + finalTax - finalDiscount;
+
+      // === Phase 17: Customer Loyalty Redemption ===
+      if (pointsToRedeem > 0) {
+        if (!sale.customerId) {
+          throw new Error("Pelanggan harus dipilih untuk menukarkan poin.");
+        }
+        const [customer] = await tx.select().from(customers).where(eq(customers.id, sale.customerId));
+        if (!customer || (customer.points || 0) < pointsToRedeem) {
+          throw new Error(`Saldo poin tidak mencukupi. Saldo saat ini: ${customer?.points || 0}`);
+        }
+        
+        finalGrandTotal -= pointsValue;
+        saleData.pointsValueRedeemed = pointsValue.toString();
+      }
+
+      if (finalGrandTotal < 0) {
+        finalGrandTotal = 0; // Allowing points to cover everything but not go negative
+      }
+
+      saleData.totalAmount = finalGrandTotal;
+      
+      const [newSale] = await tx.insert(sales).values(saleData).returning();
+
+      for (const vItem of validatedItems) {
+         await tx.insert(saleItems).values({
+            ...vItem,
+            saleId: newSale.id,
+            discountAmount: vItem.discountAmount || 0,
+            appliedPromotionId: vItem.appliedPromotionId || null
+         });
+      }
+
+      // Record Sales and Cogs into Journal via atomic txContext
+      await this.autoJournalSale(
+          newSale.id, 
+          sale.userId, 
+          calculatedGrandTotal, 
+          totalSaleCogs, 
+          sale.type || "pos", 
+          finalTax,
+          newSale.branchId || undefined,
+          tx
+      );
+
+      if (newSale.customerId) {
+          const earnedPoints = Math.floor(Number(newSale.totalAmount) / 1000);
+          const customer = await tx.select().from(customers).where(eq(customers.id, newSale.customerId)).then(res => res[0]);
+          
+          if (customer) {
+              let netPointsDelta = earnedPoints - pointsToRedeem;
+              const newPointsBalance = Math.max(0, (customer.points || 0) + netPointsDelta);
+
+              await tx.update(customers)
+                .set({ points: newPointsBalance })
+                .where(eq(customers.id, customer.id));
+              
+              // Formal Ledger Logging
+              if (pointsToRedeem > 0) {
+                await tx.insert(customerLoyaltyLedger).values({
+                  customerId: customer.id,
+                  pointsDelta: -pointsToRedeem,
+                  action: "spent",
+                  saleId: newSale.id,
+                  note: `Penukaran poin untuk transaksi #${newSale.uuid.slice(0, 8)}`,
+                  userId: sale.userId
+                });
+              }
+
+              if (earnedPoints > 0) {
+                await tx.insert(customerLoyaltyLedger).values({
+                  customerId: customer.id,
+                  pointsDelta: earnedPoints,
+                  action: "earned",
+                  saleId: newSale.id,
+                  note: `Poin didapat dari transaksi #${newSale.uuid.slice(0, 8)}`,
+                  userId: sale.userId
+                });
+              }
+
+              await tx.insert(auditLogs).values({
+                  action: pointsToRedeem > 0 ? "LOYALTY_POINTS_REDEEMED" : "LOYALTY_POINTS_EARNED",
+                  entityType: "customer",
+                  entityId: customer.id,
+                  userId: sale.userId,
+                  details: { 
+                    saleId: newSale.id, 
+                    pointsEarned: earnedPoints, 
+                    pointsSpent: pointsToRedeem,
+                    newBalance: newPointsBalance 
+                  }
+              });
+          }
+      }
+
+      return (await this.getSale(newSale.id))!;
+    });
+  }
+
+  async voidSale(id: number, userId: string, reason?: string): Promise<Sale> {
+    return await db.transaction(async (tx) => {
+      const [sale] = await tx.select().from(sales).where(and(eq(sales.id, id), eq(sales.userId, userId)));
+      if (!sale) throw new Error("Sale not found");
+      if (sale.paymentStatus === "voided") throw new Error("Sale is already voided");
+
+      // 1. Update sale status
+      const [updatedSale] = await tx.update(sales)
+        .set({
+          paymentStatus: "voided",
+          voidedAt: new Date(),
+          voidedBy: userId
+        })
+        .where(eq(sales.id, id))
+        .returning();
+
+      // 2. Restore stock
+      const items = await tx.select().from(saleItems).where(eq(saleItems.saleId, id));
+      let totalSaleCogs = 0;
+
+      for (const item of items) {
+        const parsedCogs = Number(item.cogs || 0);
+        totalSaleCogs += parsedCogs;
+
+        const [product] = await tx.select().from(products).where(eq(products.id, item.productId));
+        if (product) {
+          // This is a manual update logic without `updateProduct` hook to ensure atomic execution
+          await tx.update(products).set({
+            currentStock: (product.currentStock || 0) + Number(item.quantity)
+          }).where(eq(products.id, product.id));
+        }
+
+        // Restore FIFO Stock into inventory_lots (Branch-Aware)
+        const averageCostPerUnit = Number(item.quantity) > 0 ? parsedCogs / Number(item.quantity) : 0;
+        await tx.insert(inventoryLots).values({
+           productId: item.productId,
+           branchId: sale.branchId, // Restore ke cabang asal penjualan
+           purchasePrice: averageCostPerUnit.toString(),
+           initialQuantity: Number(item.quantity),
+           remainingQuantity: Number(item.quantity),
+           inboundDate: new Date(),
+        } as any);
+      }
+
+      // 3. Reverse accounting entries (Journal Entry Reversal) passing EXACT totalSaleCogs and tx
+      await this.autoJournalVoid(
+          id, 
+          userId, 
+          parseFloat(sale.totalAmount.toString()), 
+          totalSaleCogs, 
+          sale.type || "pos", 
+          parseFloat(sale.taxAmount?.toString() || "0"),
+          sale.branchId || undefined,
+          tx
+      );
+
+      // 4. Record Audit Log anti-fraud
+      await tx.insert(auditLogs).values({
+        action: "VOID_SALE",
+        entityType: "sale",
+        entityId: id,
+        userId: userId,
+        details: {
+          reason: reason || "Tanpa alasan",
+          voidedAmount: parseFloat(sale.totalAmount.toString()),
+          cogsReversed: totalSaleCogs,
+        }
       });
 
-      // Auto-deduct stock
-      const [product] = await db.select().from(products).where(eq(products.id, item.productId));
-      if (product) {
-        await this.updateProduct(product.id, {
-          currentStock: (product.currentStock || 0) - item.quantity
-        });
+      // 5. Phase 17: Customer Loyalty Engine (Reversal)
+      if (sale.customerId) {
+          const earnedPoints = Math.floor(parseFloat(sale.totalAmount.toString()) / 1000);
+          const redeemedPoints = sale.pointsRedeemed || 0;
+          const netPointsToRevert = redeemedPoints - earnedPoints;
+
+          const customer = await tx.select().from(customers).where(eq(customers.id, sale.customerId)).then(res => res[0]);
+          if (customer) {
+              const newPoints = Math.max(0, (customer.points || 0) + netPointsToRevert);
+              await tx.update(customers)
+                .set({ points: newPoints })
+                .where(eq(customers.id, customer.id));
+              
+              await tx.insert(customerLoyaltyLedger).values({
+                  customerId: customer.id,
+                  pointsDelta: netPointsToRevert,
+                  action: "voided",
+                  saleId: id,
+                  note: `Pembalikan poin dari pembatalan transaksi #${sale.uuid.slice(0, 8)}`,
+                  userId
+              });
+
+              await tx.insert(auditLogs).values({
+                  action: "LOYALTY_POINTS_VOIDED",
+                  entityType: "customer",
+                  entityId: customer.id,
+                  userId,
+                  details: { 
+                    saleId: sale.id, 
+                    pointsReverted: netPointsToRevert, 
+                    earnedPointsReversed: earnedPoints,
+                    redeemedPointsRestored: redeemedPoints,
+                    newBalance: newPoints 
+                  }
+              });
+          }
       }
-    }
 
-    // Create auto-journal entry
-    await this.autoJournalSale(newSale.id, sale.userId, parseFloat(sale.totalAmount.toString()), items.map(i => ({
-      productId: i.productId,
-      quantity: i.quantity,
-      unitPrice: parseFloat(i.unitPrice.toString())
-    })), sale.type || "pos");
-
-    return (await this.getSale(newSale.id))!;
+      return updatedSale;
+    });
   }
 
-  async voidSale(id: number, userId: string): Promise<Sale> {
-    const [sale] = await db.select().from(sales).where(and(eq(sales.id, id), eq(sales.userId, userId)));
-    if (!sale) throw new Error("Sale not found");
-    if (sale.paymentStatus === "voided") throw new Error("Sale is already voided");
+  async getCustomerLoyaltyHistory(customerId: number): Promise<CustomerLoyaltyLedger[]> {
+    return await db.select()
+      .from(customerLoyaltyLedger)
+      .where(eq(customerLoyaltyLedger.customerId, customerId))
+      .orderBy(desc(customerLoyaltyLedger.createdAt));
+  }
 
-    // 1. Update sale status
-    const [updatedSale] = await db.update(sales)
-      .set({
-        paymentStatus: "voided",
-        voidedAt: new Date(),
-        voidedBy: userId
-      })
-      .where(eq(sales.id, id))
-      .returning();
+  // === Phase 11: Purchase Orders (Procurement) ===
+  async getSuppliers(userId: string): Promise<Supplier[]> {
+    const { suppliers } = await import("@shared/schema");
+    return await db.query.suppliers.findMany({
+      where: eq(suppliers.userId, userId),
+      orderBy: desc(suppliers.createdAt),
+    });
+  }
 
-    // 2. Restore stock
-    const items = await db.select().from(saleItems).where(eq(saleItems.saleId, id));
+  async createSupplier(supplier: InsertSupplier): Promise<Supplier> {
+    const { suppliers } = await import("@shared/schema");
+    const [newSupplier] = await db.insert(suppliers).values(supplier).returning();
+    return newSupplier;
+  }
+
+  async updateSupplier(id: number, data: Partial<InsertSupplier>): Promise<Supplier> {
+    const { suppliers } = await import("@shared/schema");
+    const [updated] = await db.update(suppliers).set(data).where(eq(suppliers.id, id)).returning();
+    return updated;
+  }
+
+  async getPurchaseOrders(userId: string): Promise<any[]> {
+    const { purchaseOrders } = await import("@shared/schema");
+    const result = await db.query.purchaseOrders.findMany({
+      where: eq(purchaseOrders.userId, userId),
+      orderBy: desc(purchaseOrders.createdAt),
+      with: { items: { with: { product: true } } }
+    });
+    return result;
+  }
+
+  async createPurchaseOrder(po: any, items: any[]): Promise<any> {
+    const { purchaseOrders, purchaseOrderItems } = await import("@shared/schema");
+    
+    // Auto generate PO number if not provided
+    if (!po.poNumber) {
+        const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+        const count = await db.select().from(purchaseOrders).where(eq(purchaseOrders.userId, po.userId));
+        po.poNumber = `PO-${dateStr}-${(count.length + 1).toString().padStart(4, "0")}`;
+    }
+
+    const [newPo] = await db.insert(purchaseOrders).values(po).returning();
     for (const item of items) {
-      const [product] = await db.select().from(products).where(eq(products.id, item.productId));
-      if (product) {
-        await this.updateProduct(product.id, {
-          currentStock: (product.currentStock || 0) + item.quantity
-        });
-      }
+      await db.insert(purchaseOrderItems).values({ ...item, poId: newPo.id });
     }
-
-    // 3. Reverse accounting entries (Journal Entry Reversal)
-    await this.autoJournalVoid(id, userId, parseFloat(sale.totalAmount.toString()), items.map(i => ({
-      productId: i.productId,
-      quantity: i.quantity,
-      unitPrice: parseFloat(i.unitPrice.toString())
-    })), sale.type || "pos");
-
-    return updatedSale;
+    return newPo;
   }
 
-  async getCustomers(userId: string): Promise<Customer[]> {
-    return await db.select().from(customers).where(eq(customers.userId, userId)).orderBy(desc(customers.createdAt));
+  async completePurchaseOrder(id: number): Promise<any> {
+    const { purchaseOrders, inboundSessions, inboundItems } = await import("@shared/schema");
+    
+    const po = await db.query.purchaseOrders.findFirst({
+        where: eq(purchaseOrders.id, id),
+        with: { items: true }
+    });
+    
+    if (!po) throw new Error("PO tidak ditemukan");
+    
+    await db.update(purchaseOrders).set({ status: "completed", updatedAt: new Date() }).where(eq(purchaseOrders.id, id));
+    
+    // Create inbound session automatically from PO
+    const [session] = await db.insert(inboundSessions).values({
+      title: `Penerimaan PO: ${po.poNumber}`,
+      userId: po.userId,
+      status: "in_progress",
+      notes: `Otomatis dari Purchase Order #${po.poNumber}`,
+    }).returning();
+
+    for (const item of po.items) {
+      await db.insert(inboundItems).values({
+        sessionId: session.id,
+        productId: item.productId,
+        quantityReceived: item.quantityOrdered,
+      });
+    }
+    return session;
+  }
+
+  // === Phase 16: RMA & Sales Returns ===
+  async getSalesReturns(userId: string): Promise<any[]> {
+    const { salesReturns, sales } = await import("@shared/schema");
+    return await db.query.salesReturns.findMany({
+      where: eq(salesReturns.userId, userId),
+      orderBy: desc(salesReturns.createdAt),
+      with: {
+        sale: { with: { customer: true } },
+      }
+    });
+  }
+
+  async getSalesReturn(id: number): Promise<any> {
+    const { salesReturns, sales } = await import("@shared/schema");
+    return await db.query.salesReturns.findFirst({
+      where: eq(salesReturns.id, id),
+      with: {
+        sale: { with: { customer: true } },
+        items: { with: { product: true } }
+      }
+    });
+  }
+
+  async createSalesReturn(userId: string, data: any, items: any[]): Promise<any> {
+    const { salesReturns, salesReturnItems, products, inventoryLots } = await import("@shared/schema");
+    const { eq, sql } = await import("drizzle-orm");
+
+    return await db.transaction(async (tx) => {
+      // 1. Create return header
+      const [newReturn] = await tx.insert(salesReturns).values({ ...data, userId }).returning();
+
+      for (const item of items) {
+        // 2. Create return item
+        await tx.insert(salesReturnItems).values({ ...item, returnId: newReturn.id });
+
+        // 3. Handle inventory if restock status is 'restocked'
+        if (item.restockStatus === "restocked") {
+          // Increment total product stock
+          await tx.update(products)
+            .set({ currentStock: sql`${products.currentStock} + ${item.quantityReturned}` })
+            .where(eq(products.id, item.productId));
+
+          // Create a new inventory lot for the returned items
+          // We get the original cost if possible, otherwise use 0
+          const [product] = await tx.select().from(products).where(eq(products.id, item.productId));
+          
+          await tx.insert(inventoryLots).values({
+            productId: item.productId,
+            purchasePrice: product?.unitCost || "0",
+            initialQuantity: item.quantityReturned,
+            remainingQuantity: item.quantityReturned,
+            inboundDate: new Date(),
+            notes: `Retur dari Penjualan #${data.saleId} (RMA: ${newReturn.returnNumber})`
+          });
+        }
+      }
+
+      // 4. Create activity log
+      await this.createActivityLog({
+        userId,
+        action: "CREATE_SALES_RETURN",
+        entityType: "sales_return",
+        entityId: newReturn.id,
+        details: { returnNumber: newReturn.returnNumber, saleId: data.saleId, itemCount: items.length }
+      });
+
+      return newReturn;
+    });
+  }
+
+  async createAuditLog(log: InsertAuditLog): Promise<AuditLog> {
+    const [result] = await db.insert(auditLogs).values(log).returning();
+    return result;
+  }
+
+  async getCustomers(userId: string, branchId?: number): Promise<Customer[]> {
+    const { eq, and } = await import("drizzle-orm");
+    const whereClause = branchId
+      ? and(eq(customers.userId, userId), eq(customers.branchId, branchId))
+      : eq(customers.userId, userId);
+
+    return await db.select().from(customers).where(whereClause).orderBy(desc(customers.createdAt));
   }
 
   // === POS Devices ===
@@ -1130,12 +1979,35 @@ export class DatabaseStorage implements IStorage {
     return newAccount;
   }
 
-  async getJournalEntries(userId: string): Promise<(JournalEntry & { items: JournalItem[] })[]> {
+  async getJournalEntries(userId: string, branchId?: number): Promise<any[]> {
     const entries = await db.select().from(journalEntries).where(eq(journalEntries.userId, userId)).orderBy(desc(journalEntries.date));
     const result = [];
     for (const entry of entries) {
-      const items = await db.select().from(journalItems).where(eq(journalItems.entryId, entry.id));
-      result.push({ ...entry, items });
+      const { eq, and } = await import("drizzle-orm");
+      const itemConditions = [eq(journalItems.entryId, entry.id)];
+      if (branchId !== undefined) {
+        itemConditions.push(eq(journalItems.branchId, branchId));
+      }
+
+      const items = await db.select({
+        id: journalItems.id,
+        entryId: journalItems.entryId,
+        accountId: journalItems.accountId,
+        debit: journalItems.debit,
+        credit: journalItems.credit,
+        userId: journalItems.userId,
+        branchId: journalItems.branchId,
+        accountName: accounts.name,
+        accountCode: accounts.code,
+      })
+      .from(journalItems)
+      .leftJoin(accounts, eq(journalItems.accountId, accounts.id))
+      .where(and(...itemConditions));
+      
+      // Only include entries that have items matching the branch filter
+      if (items.length > 0) {
+        result.push({ ...entry, items });
+      }
     }
     return result;
   }
@@ -1168,16 +2040,20 @@ export class DatabaseStorage implements IStorage {
         { code: "1201", name: "Persediaan Barang Dagang", type: "asset", userId },
         { code: "1301", name: "Aset Tetap - Peralatan", type: "asset", userId },
         { code: "2101", name: "Hutang Usaha", type: "liability", userId },
+        { code: "2102", name: "Hutang Pajak (Tax Payable - PB1/PPN)", type: "liability", userId },
+        { code: "2103", name: "Alokasi Biaya Produksi (Overhead & Tenaga Kerja)", type: "liability", userId },
         { code: "3101", name: "Modal Pemilik", type: "equity", userId },
         { code: "4101", name: "Penjualan Barang", type: "income", userId },
+        { code: "4201", name: "Pendapatan Selisih Stok (Lebih)", type: "income", userId },
         { code: "5101", name: "Harga Pokok Penjualan (HPP)", type: "expense", userId },
+        { code: "5102", name: "Beban Selisih Stok (Kurang)", type: "expense", userId },
         { code: "5201", name: "Biaya Operasional", type: "expense", userId },
       ];
       await db.insert(accounts).values(defaults);
     }
   }
 
-  async autoJournalSale(saleId: number, userId: string, totalAmount: number, items: { productId: number; quantity: number; unitPrice: number }[], type: string = "pos") {
+  async autoJournalSale(saleId: number, userId: string, totalAmount: number, totalCogs: number, type: string = "pos", taxAmount: number = 0, branchId?: number, txContext?: any) {
     await this.ensureDefaultAccounts(userId);
     const userAccounts = await this.getAccounts(userId);
 
@@ -1187,44 +2063,142 @@ export class DatabaseStorage implements IStorage {
     const hppAcc = findAccount("5101");
     const invAcc = findAccount("1201");
     const receivableAcc = findAccount("1103");
+    const taxAcc = findAccount("2102");
 
     if (!cashAcc || !salesAcc || !hppAcc || !invAcc || !receivableAcc) return;
 
+    const executor = txContext || db;
+
     // 1. Journal Sale
-    // If POS: Debit Cash, Credit Sales
-    // If ERP Invoice: Debit Accounts Receivable, Credit Sales
     const debitAccount = type === "pos" ? cashAcc.id : receivableAcc.id;
     const descPrefix = type === "pos" ? "Penjualan POS" : "Penjualan Invoice";
 
-    await this.createJournalEntry(
-      { description: `${descPrefix} #${saleId}`, reference: `SALE-${saleId}`, userId, date: new Date() },
-      [
-        { accountId: debitAccount, debit: totalAmount, credit: 0, userId },
-        { accountId: salesAcc.id, debit: 0, credit: totalAmount, userId },
-      ]
-    );
+    const pureRevenue = totalAmount - taxAmount;
+    const jItems = [
+      { accountId: debitAccount, debit: totalAmount, credit: 0, userId, branchId },
+      { accountId: salesAcc.id, debit: 0, credit: pureRevenue, userId, branchId },
+    ];
 
-    // 2. Journal COGS (Debit HPP, Credit Inventory)
-    let totalCogs = 0;
-    for (const item of items) {
-      const product = await this.getProduct(item.productId);
-      if (product) {
-        totalCogs += (product.unitCost || 0) * item.quantity;
-      }
+    if (taxAmount > 0 && taxAcc) {
+      jItems.push({ accountId: taxAcc.id, debit: 0, credit: taxAmount, userId, branchId });
     }
 
+    const { journalEntries, journalItems } = await import("@shared/schema");
+
+    const saleEntry = { description: `${descPrefix} #${saleId}`, reference: `SALE-${saleId}`, userId, date: new Date() };
+    const [newSaleEntry] = await executor.insert(journalEntries).values(saleEntry).returning();
+    for (const item of jItems) {
+      await executor.insert(journalItems).values({ ...item, entryId: newSaleEntry.id } as InsertJournalItem);
+    }
+
+    // 2. Journal COGS (Debit HPP, Credit Inventory)
     if (totalCogs > 0) {
-      await this.createJournalEntry(
-        { description: `HPP ${descPrefix} #${saleId}`, reference: `SALE-${saleId}`, userId, date: new Date() },
-        [
-          { accountId: hppAcc.id, debit: totalCogs, credit: 0, userId },
-          { accountId: invAcc.id, debit: 0, credit: totalCogs, userId },
-        ]
-      );
+      const cogsEntry = { description: `HPP ${descPrefix} #${saleId}`, reference: `SALE-${saleId}`, userId, date: new Date() };
+      const [newCogsEntry] = await executor.insert(journalEntries).values(cogsEntry).returning();
+      const cogsItems = [
+          { accountId: hppAcc.id, debit: totalCogs, credit: 0, userId, branchId },
+          { accountId: invAcc.id, debit: 0, credit: totalCogs, userId, branchId },
+      ];
+      for (const item of cogsItems) {
+        await executor.insert(journalItems).values({ ...item, entryId: newCogsEntry.id } as InsertJournalItem);
+      }
     }
   }
 
-  async autoJournalVoid(saleId: number, userId: string, totalAmount: number, items: { productId: number; quantity: number; unitPrice: number }[], type: string = "pos") {
+  async autoJournalStockAdjustment(sessionId: number, userId: string, adjustments: { type: "shrinkage" | "surplus", amount: number, productName: string, branchId?: number }[]) {
+    await this.ensureDefaultAccounts(userId);
+    const userAccounts = await this.getAccounts(userId);
+    const findAccount = (code: string) => userAccounts.find(a => a.code === code);
+
+    const invAcc = findAccount("1201");
+    const shrinkageAcc = findAccount("5102");
+    const surplusAcc = findAccount("4201");
+
+    if (!invAcc || !shrinkageAcc || !surplusAcc) return;
+
+    for (const adj of adjustments) {
+      if (adj.amount <= 0) continue;
+
+      if (adj.type === "shrinkage") {
+        // Debit Beban Selisih, Credit Persediaan
+        await this.createJournalEntry(
+          { description: `Selisih Stok Kurang (Shrinkage) Opname #${sessionId}: ${adj.productName}`, reference: `OPN-${sessionId}`, userId, date: new Date() },
+          [
+            { accountId: shrinkageAcc.id, debit: adj.amount, credit: 0, userId, branchId: adj.branchId },
+            { accountId: invAcc.id, debit: 0, credit: adj.amount, userId, branchId: adj.branchId },
+          ]
+        );
+      } else {
+        // Debit Persediaan, Credit Pendapatan Selisih
+        await this.createJournalEntry(
+          { description: `Selisih Stok Lebih (Surplus) Opname #${sessionId}: ${adj.productName}`, reference: `OPN-${sessionId}`, userId, date: new Date() },
+          [
+            { accountId: invAcc.id, debit: adj.amount, credit: 0, userId, branchId: adj.branchId },
+            { accountId: surplusAcc.id, debit: 0, credit: adj.amount, userId, branchId: adj.branchId },
+          ]
+        );
+      }
+    }
+  }
+
+  async deductFifoStockAndGetCogs(productId: number, quantity: number, branchId?: number, txContext?: any): Promise<number> {
+    const { eq, and, gt, asc, isNull, or } = await import("drizzle-orm");
+    const executor = txContext || db;
+    
+    // Filter by branch if provided, otherwise fallback to general lots (for backward compatibility)
+    const branchFilter = branchId 
+        ? eq(inventoryLots.branchId, branchId) 
+        : isNull(inventoryLots.branchId);
+
+    const lots = await executor.select().from(inventoryLots)
+      .where(and(
+        eq(inventoryLots.productId, productId), 
+        gt(inventoryLots.remainingQuantity, 0),
+        branchFilter
+      ))
+      .orderBy(asc(inventoryLots.inboundDate));
+
+    let qtyToDeduct = quantity;
+    let totalCogs = 0;
+
+    for (const lot of lots) {
+      if (qtyToDeduct <= 0) break;
+
+      const qtyFromLot = Math.min(qtyToDeduct, lot.remainingQuantity);
+      totalCogs += qtyFromLot * Number(lot.purchasePrice);
+
+      await executor.update(inventoryLots)
+        .set({ remainingQuantity: lot.remainingQuantity - qtyFromLot })
+        .where(eq(inventoryLots.id, lot.id));
+
+      qtyToDeduct -= qtyFromLot;
+    }
+
+    // Fallback if not enough lots exist (sell beyond registered stock)
+    if (qtyToDeduct > 0) {
+      const [product] = await executor.select().from(products).where(eq(products.id, productId));
+      if (product) {
+        let fallbackCost = Number(product.unitCost || 0);
+        // Phantom Profit Prevention: If unitCost is 0, try to find the last known purchase price
+        if (fallbackCost === 0) {
+          const [lastLot] = await executor.select().from(inventoryLots)
+            .where(eq(inventoryLots.productId, productId))
+            .orderBy(asc(inventoryLots.inboundDate)); // Should be desc, wait, let's fix that
+          if (lastLot && Number(lastLot.purchasePrice) > 0) {
+             fallbackCost = Number(lastLot.purchasePrice);
+          } else {
+             // If still 0, fallback to selling price minus arbitrary 30% margin to prevent wild 100% tax inflating
+             fallbackCost = Number(product.sellingPrice || 0) * 0.7;
+          }
+        }
+        totalCogs += qtyToDeduct * fallbackCost;
+      }
+    }
+
+    return totalCogs;
+  }
+
+  async autoJournalVoid(saleId: number, userId: string, totalAmount: number, totalCogs: number, type: string = "pos", taxAmount: number = 0, branchId?: number, txContext?: any) {
     await this.ensureDefaultAccounts(userId);
     const userAccounts = await this.getAccounts(userId);
 
@@ -1234,38 +2208,47 @@ export class DatabaseStorage implements IStorage {
     const hppAcc = findAccount("5101");
     const invAcc = findAccount("1201");
     const receivableAcc = findAccount("1103");
+    const taxAcc = findAccount("2102");
 
     if (!cashAcc || !salesAcc || !hppAcc || !invAcc || !receivableAcc) return;
+
+    const executor = txContext || db;
+    const { journalEntries, journalItems } = await import("@shared/schema");
 
     // 1. Reverse Sale Journal
     const creditAccount = type === "pos" ? cashAcc.id : receivableAcc.id;
     const descPrefix = type === "pos" ? "Void Penjualan POS" : "Void Penjualan Invoice";
 
-    await this.createJournalEntry(
-      { description: `${descPrefix} #${saleId}`, reference: `VOID-${saleId}`, userId, date: new Date() },
-      [
-        { accountId: salesAcc.id, debit: totalAmount, credit: 0, userId },
-        { accountId: creditAccount, debit: 0, credit: totalAmount, userId },
-      ]
-    );
+    const pureRevenue = totalAmount - taxAmount;
+    const jItems = [
+      { accountId: salesAcc.id, debit: pureRevenue, credit: 0, userId, branchId },
+      { accountId: creditAccount, debit: 0, credit: totalAmount, userId, branchId },
+    ];
 
-    // 2. Reverse COGS Journal
-    let totalCogs = 0;
-    for (const item of items) {
-      const product = await this.getProduct(item.productId);
-      if (product) {
-        totalCogs += (product.unitCost || 0) * item.quantity;
-      }
+    if (taxAmount > 0 && taxAcc) {
+      jItems.push({ accountId: taxAcc.id, debit: taxAmount, credit: 0, userId, branchId });
     }
 
+    const voidSaleEntry = { description: `${descPrefix} #${saleId}`, reference: `VOID-${saleId}`, userId, date: new Date() };
+    const [newVoidSaleEntry] = await executor.insert(journalEntries).values(voidSaleEntry).returning();
+    
+    for (const item of jItems) {
+      await executor.insert(journalItems).values({ ...item, entryId: newVoidSaleEntry.id } as InsertJournalItem);
+    }
+
+    // 2. Reverse COGS Journal
     if (totalCogs > 0) {
-      await this.createJournalEntry(
-        { description: `Void HPP ${descPrefix} #${saleId}`, reference: `VOID-${saleId}`, userId, date: new Date() },
-        [
-          { accountId: invAcc.id, debit: totalCogs, credit: 0, userId },
-          { accountId: hppAcc.id, debit: 0, credit: totalCogs, userId },
-        ]
-      );
+      const voidCogsEntry = { description: `Void HPP ${descPrefix} #${saleId}`, reference: `VOID-${saleId}`, userId, date: new Date() };
+      const [newVoidCogsEntry] = await executor.insert(journalEntries).values(voidCogsEntry).returning();
+      
+      const cogsItems = [
+          { accountId: invAcc.id, debit: totalCogs, credit: 0, userId, branchId },
+          { accountId: hppAcc.id, debit: 0, credit: totalCogs, userId, branchId },
+      ];
+      
+      for (const item of cogsItems) {
+        await executor.insert(journalItems).values({ ...item, entryId: newVoidCogsEntry.id } as InsertJournalItem);
+      }
     }
   }
 
@@ -1317,8 +2300,13 @@ export class DatabaseStorage implements IStorage {
   }
 
   // === POS ECOSYSTEM ===
-  async getPOSSessions(userId: string): Promise<any[]> {
-    const sessions = await db.select().from(posSessions).where(eq(posSessions.userId, userId)).orderBy(desc(posSessions.startTime));
+  async getPOSSessions(userId: string, branchId?: number): Promise<any[]> {
+    const { eq, and } = await import("drizzle-orm");
+    const whereClause = branchId
+      ? and(eq(posSessions.userId, userId), eq(posSessions.branchId, branchId))
+      : eq(posSessions.userId, userId);
+
+    const sessions = await db.select().from(posSessions).where(whereClause).orderBy(desc(posSessions.startTime));
 
     const enrichedSessions = await Promise.all(sessions.map(async (session) => {
       const sessionSales = await db.select().from(sales).where(and(eq(sales.sessionId, session.id), eq(sales.paymentStatus, "paid")));
@@ -1341,8 +2329,12 @@ export class DatabaseStorage implements IStorage {
     return enrichedSessions;
   }
 
-  async getActivePOSSession(userId: string): Promise<any | undefined> {
-    const [session] = await db.select().from(posSessions).where(and(eq(posSessions.userId, userId), eq(posSessions.status, "open"))).orderBy(desc(posSessions.startTime));
+  async getActivePOSSession(userId: string, branchId?: number): Promise<any | undefined> {
+    const { eq, and } = await import("drizzle-orm");
+    const conditions = [eq(posSessions.userId, userId), eq(posSessions.status, "open")];
+    if (branchId) conditions.push(eq(posSessions.branchId, branchId));
+
+    const [session] = await db.select().from(posSessions).where(and(...conditions)).orderBy(desc(posSessions.startTime));
     if (!session) return undefined;
 
     // Calculate totals on the fly
@@ -1435,6 +2427,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Pricing & Bundling
+  async getTieredPricingAll(userId: string): Promise<TieredPricing[]> {
+    return await db.select().from(tieredPricing).where(eq(tieredPricing.userId, userId)).orderBy(tieredPricing.minQuantity);
+  }
+
   async getTieredPricing(productId: number): Promise<TieredPricing[]> {
     return await db.select().from(tieredPricing).where(eq(tieredPricing.productId, productId)).orderBy(tieredPricing.minQuantity);
   }
@@ -1468,16 +2464,40 @@ export class DatabaseStorage implements IStorage {
 
   async createCategory(data: InsertCategory & { userId: string }): Promise<Category> {
     const [result] = await db.insert(categories).values(data).returning();
+    await this.createActivityLog({
+      action: "CREATE",
+      entityType: "category",
+      entityId: result.id,
+      userId: data.userId,
+      details: { name: result.name }
+    });
     return result;
   }
 
   async updateCategory(id: number, updates: Partial<InsertCategory>): Promise<Category> {
     const [result] = await db.update(categories).set(updates).where(eq(categories.id, id)).returning();
+    await this.createActivityLog({
+      action: "UPDATE",
+      entityType: "category",
+      entityId: result.id,
+      userId: result.userId || "system",
+      details: { name: result.name, updates: Object.keys(updates) }
+    });
     return result;
   }
 
   async deleteCategory(id: number): Promise<void> {
-    await db.delete(categories).where(eq(categories.id, id));
+    const [category] = await db.select().from(categories).where(eq(categories.id, id));
+    if (category) {
+      await this.createActivityLog({
+        action: "DELETE",
+        entityType: "category",
+        entityId: id,
+        userId: category.userId || "system",
+        details: { name: category.name }
+      });
+      await db.delete(categories).where(eq(categories.id, id));
+    }
   }
 
   async getUnits(userId: string): Promise<Unit[]> {
@@ -1486,16 +2506,40 @@ export class DatabaseStorage implements IStorage {
 
   async createUnit(data: InsertUnit & { userId: string }): Promise<Unit> {
     const [result] = await db.insert(units).values(data).returning();
+    await this.createActivityLog({
+      action: "CREATE",
+      entityType: "unit",
+      entityId: result.id,
+      userId: data.userId,
+      details: { name: result.name }
+    });
     return result;
   }
 
   async updateUnit(id: number, updates: Partial<InsertUnit>): Promise<Unit> {
     const [result] = await db.update(units).set(updates).where(eq(units.id, id)).returning();
+    await this.createActivityLog({
+      action: "UPDATE",
+      entityType: "unit",
+      entityId: result.id,
+      userId: result.userId || "system",
+      details: { name: result.name, updates: Object.keys(updates) }
+    });
     return result;
   }
 
   async deleteUnit(id: number): Promise<void> {
-    await db.delete(units).where(eq(units.id, id));
+    const [unit] = await db.select().from(units).where(eq(units.id, id));
+    if (unit) {
+      await this.createActivityLog({
+        action: "DELETE",
+        entityType: "unit",
+        entityId: id,
+        userId: unit.userId || "system",
+        details: { name: unit.name }
+      });
+      await db.delete(units).where(eq(units.id, id));
+    }
   }
 
   // === Activity Logs ===
@@ -1512,6 +2556,331 @@ export class DatabaseStorage implements IStorage {
   async createActivityLog(data: InsertActivityLog): Promise<ActivityLog> {
     const [log] = await db.insert(activityLogs).values(data).returning();
     return log;
+  }
+
+  async checkStockIntegrity(userId: string): Promise<{ productId: number; sku: string; currentStock: number; lotStock: number; diff: number }[]> {
+    const allProducts = await this.getProducts(userId);
+    const result = [];
+    
+    for (const p of allProducts) {
+      const lots = await db.select().from(inventoryLots).where(eq(inventoryLots.productId, p.id));
+      const lotTotal = lots.reduce((sum, l) => sum + Number(l.remainingQuantity), 0);
+      
+      if (Number(p.currentStock) !== lotTotal) {
+        result.push({
+          productId: p.id,
+          sku: p.sku,
+          currentStock: Number(p.currentStock),
+          lotStock: lotTotal,
+          diff: Number(p.currentStock) - lotTotal
+        });
+      }
+    }
+    
+    return result;
+  }
+
+  // === Stock Transfers ===
+  async getStockTransfers(userId: string): Promise<any[]> {
+    const results = await db.query.stockTransfers.findMany({
+      where: eq(stockTransfers.userId, userId),
+      with: {
+        fromBranch: true,
+        toBranch: true,
+      },
+      orderBy: desc(stockTransfers.createdAt),
+    });
+    return results;
+  }
+
+  async getStockTransfer(id: number): Promise<any | undefined> {
+    const result = await db.query.stockTransfers.findFirst({
+      where: eq(stockTransfers.id, id),
+      with: {
+        fromBranch: true,
+        toBranch: true,
+        items: {
+          with: {
+            product: true
+          }
+        }
+      }
+    });
+    return result;
+  }
+
+  async createStockTransfer(userId: string, transfer: InsertStockTransfer, items: InsertStockTransferItem[]): Promise<any> {
+    const [result] = await db.insert(stockTransfers).values({ ...transfer, userId }).returning();
+    
+    for (const item of items) {
+      await db.insert(stockTransferItems).values({ ...item, transferId: result.id });
+      
+      // If status is in_transit, deduct stock from source branch immediately
+      if (transfer.status === "in_transit" && transfer.fromBranchId) {
+        // deductFifoStockAndGetCogs will handle lot reduction in the specific branch
+        await this.deductFifoStockAndGetCogs(item.productId, item.quantity, transfer.fromBranchId);
+      }
+    }
+
+    await this.createActivityLog({
+      action: "CREATE_TRANSFER",
+      entityType: "stock_transfer",
+      entityId: result.id,
+      userId,
+      details: { from: transfer.fromBranchId, to: transfer.toBranchId, itemCount: items.length }
+    });
+
+    return result;
+  }
+
+  async completeStockTransfer(id: number, receivedBy: string): Promise<any> {
+    const transfer = await this.getStockTransfer(id);
+    if (!transfer || transfer.status === "received") return transfer;
+
+    // 1. Update status
+    const [updated] = await db.update(stockTransfers)
+      .set({ status: "received", receivedBy, receivedAt: new Date() })
+      .where(eq(stockTransfers.id, id))
+      .returning();
+
+    // 2. Add stock to Destination Branch (inventory_lots)
+    if (transfer.toBranchId) {
+      for (const item of transfer.items) {
+        // Find existing unit cost for this product to maintain HPP (FIFO continuity)
+        const product = await this.getProduct(item.productId);
+        const cost = Number(product?.unitCost || 0);
+
+        await db.insert(inventoryLots).values({
+          productId: item.productId,
+          branchId: transfer.toBranchId,
+          purchasePrice: cost,
+          initialQuantity: item.quantity,
+          remainingQuantity: item.quantity,
+          inboundDate: new Date(),
+          notes: `Transfer from ${transfer.fromBranch?.name || "Other Branch"} (#${transfer.id})`
+        });
+      }
+    }
+
+    await this.createActivityLog({
+      action: "COMPLETE_TRANSFER",
+      entityType: "stock_transfer",
+      entityId: id,
+      userId: transfer.userId,
+      details: { from: transfer.fromBranchId, to: transfer.toBranchId }
+    });
+
+    return updated;
+  }
+
+  async getConsolidatedStock(productId: number, userId: string): Promise<any[]> {
+    const { branches: branchesTable } = await import("@shared/schema");
+    const allBranches = await db.select().from(branchesTable).where(eq(branchesTable.userId, userId));
+    const results = [];
+
+    for (const branch of allBranches) {
+      const lots = await db.select().from(inventoryLots)
+        .where(and(eq(inventoryLots.productId, productId), eq(inventoryLots.branchId, branch.id)));
+      
+      const totalStock = lots.reduce((sum, l) => sum + Number(l.remainingQuantity), 0);
+      results.push({
+        branchId: branch.id,
+        branchName: branch.name,
+        branchType: branch.type,
+        stock: totalStock
+      });
+    }
+    return results;
+  }
+
+  async getLogisticsAlerts(userId: string): Promise<any[]> {
+    const products = await this.getProducts(userId);
+    const { branches: branchesTable } = await import("@shared/schema");
+    const allBranches = await db.select().from(branchesTable).where(eq(branchesTable.userId, userId));
+    const alerts: any[] = [];
+
+    for (const p of products) {
+      if (!p.minStock) continue;
+
+      const branchStocks: any[] = [];
+      for (const b of allBranches) {
+        const lots = await db.select().from(inventoryLots)
+          .where(and(eq(inventoryLots.productId, p.id), eq(inventoryLots.branchId, b.id)));
+        const stock = lots.reduce((sum, l) => sum + Number(l.remainingQuantity), 0);
+        branchStocks.push({ id: b.id, name: b.name, stock });
+      }
+
+      const lowBranches = branchStocks.filter(bs => bs.stock < p.minStock);
+      const highBranches = branchStocks.filter(bs => bs.stock > (p.minStock * 2));
+
+      if (lowBranches.length > 0 && highBranches.length > 0) {
+        for (const target of lowBranches) {
+          const source = highBranches[0]; // Simplistic: pick the first one with plenty of stock
+          alerts.push({
+            type: "STOCK_IMBALANCE",
+            productId: p.id,
+            productName: p.name,
+            sku: p.sku,
+            fromBranchId: source.id,
+            fromBranchName: source.name,
+            toBranchId: target.id,
+            toBranchName: target.name,
+            suggestedQty: Math.ceil(p.minStock * 1.5 - target.stock),
+            urgency: target.stock === 0 ? "high" : "medium"
+          });
+        }
+      }
+    }
+    return alerts;
+  }
+
+  // === Phase 19: Analytics ===
+  async getStockHealth(userId: string): Promise<{ totalItems: number; outOfStock: number; lowStock: number; healthy: number }> {
+    const allProducts = await this.getProducts(userId);
+    let outOfStock = 0;
+    let lowStock = 0;
+    let healthy = 0;
+
+    for (const p of allProducts) {
+      if (p.currentStock <= 0) {
+        outOfStock++;
+      } else if (p.currentStock < (p.minStock || 0)) {
+        lowStock++;
+      } else {
+        healthy++;
+      }
+    }
+
+    return {
+      totalItems: allProducts.length,
+      outOfStock,
+      lowStock,
+      healthy
+    };
+  }
+
+  async getTopSellingItems(userId: string, limit: number = 5): Promise<{ productId: number; name: string; totalQuantity: number; totalRevenue: number }[]> {
+    const { sum, sql } = await import("drizzle-orm");
+    const results = await db.select({
+      productId: saleItems.productId,
+      name: products.name,
+      totalQuantity: sql<number>`CAST(SUM(${saleItems.quantity}) AS FLOAT)`,
+      totalRevenue: sql<number>`CAST(SUM(${saleItems.subtotal}) AS FLOAT)`,
+    })
+    .from(saleItems)
+    .innerJoin(products, eq(saleItems.productId, products.id))
+    .where(eq(products.userId, userId))
+    .groupBy(saleItems.productId, products.name)
+    .orderBy(desc(sql`SUM(${saleItems.quantity})`))
+    .limit(limit);
+
+    return results;
+  }
+
+  async getCategoryPerformance(userId: string): Promise<{ category: string; totalItems: number; totalStock: number; totalValue: number; totalSales: number }[]> {
+    const { sql, count } = await import("drizzle-orm");
+    
+    // First get stock and value per category
+    const stockResults = await db.select({
+      category: products.category,
+      totalItems: count(products.id),
+      totalStock: sql<number>`CAST(SUM(${products.currentStock}) AS FLOAT)`,
+      totalValue: sql<number>`CAST(SUM(${products.currentStock} * ${products.sellingPrice}) AS FLOAT)`,
+    })
+    .from(products)
+    .where(eq(products.userId, userId))
+    .groupBy(products.category);
+
+    // Then get sales per category
+    const salesResults = await db.select({
+      category: products.category,
+      totalSales: sql<number>`CAST(SUM(${saleItems.subtotal}) AS FLOAT)`,
+    })
+    .from(saleItems)
+    .innerJoin(products, eq(saleItems.productId, products.id))
+    .where(eq(products.userId, userId))
+    .groupBy(products.category);
+
+    return stockResults.map(s => {
+      const sales = salesResults.find(sr => sr.category === s.category);
+      return {
+        category: s.category || "Uncategorized",
+        totalItems: s.totalItems,
+        totalStock: s.totalStock || 0,
+        totalValue: s.totalValue || 0,
+        totalSales: sales?.totalSales || 0
+      };
+    });
+  }
+
+  // === Phase 20: Demand Forecasting ===
+  async getInventoryDemand(userId: string): Promise<any[]> {
+    const allProducts = await this.getProducts(userId);
+    const results = [];
+
+    for (const p of allProducts) {
+      // Get sales for last 30 days
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      const [salesCount] = await db.select({
+        total: sql<number>`CAST(SUM(${saleItems.quantity}) AS FLOAT)`
+      })
+      .from(saleItems)
+      .innerJoin(sales, eq(saleItems.saleId, sales.id))
+      .where(and(
+        eq(saleItems.productId, p.id),
+        gt(sales.createdAt, thirtyDaysAgo)
+      ));
+
+      const monthlySales = salesCount?.total || 0;
+      const dailyVelocity = monthlySales / 30;
+      const daysLeft = dailyVelocity > 0 ? (p.currentStock / dailyVelocity) : 999;
+
+      results.push({
+        productId: p.id,
+        name: p.name,
+        sku: p.sku,
+        currentStock: p.currentStock,
+        monthlySales,
+        dailyVelocity,
+        daysLeft,
+        suggestedRestock: daysLeft < 7 ? Math.ceil(dailyVelocity * 14 - p.currentStock) : 0
+      });
+    }
+
+    return results;
+  }
+
+  async getSalesForecast(userId: string): Promise<any> {
+    const { sql } = await import("drizzle-orm");
+    const results = await db.select({
+      date: sql<string>`DATE(${sales.createdAt})`,
+      total: sql<number>`CAST(SUM(${sales.totalAmount}) AS FLOAT)`
+    })
+    .from(sales)
+    .where(eq(sales.userId, userId))
+    .groupBy(sql`DATE(${sales.createdAt})`)
+    .orderBy(desc(sql`DATE(${sales.createdAt})`))
+    .limit(30);
+
+    return results;
+  }
+
+  async getInventoryAging(userId: string): Promise<any> {
+    const results = await db.select({
+      productId: inventoryLots.productId,
+      name: products.name,
+      totalQuantity: sql<number>`CAST(SUM(${inventoryLots.remainingQuantity}) AS FLOAT)`,
+      avgAgeDays: sql<number>`CAST(AVG(EXTRACT(DAY FROM NOW() - ${inventoryLots.inboundDate})) AS FLOAT)`
+    })
+    .from(inventoryLots)
+    .innerJoin(products, eq(inventoryLots.productId, products.id))
+    .where(eq(products.userId, userId))
+    .groupBy(inventoryLots.productId, products.name)
+    .having(gt(sql`SUM(${inventoryLots.remainingQuantity})`, 0));
+
+    return results;
   }
 }
 

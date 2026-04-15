@@ -211,9 +211,9 @@ export default function SubscriptionPage() {
       }, null as string | null)
     : null;
 
-  const formatDate = (dateStr: string | null) => {
-    if (!dateStr) return "-";
-    return new Date(dateStr).toLocaleDateString("id-ID", {
+  const formatDate = (date: string | Date | null) => {
+    if (!date) return "-";
+    return new Date(date).toLocaleDateString("id-ID", {
       day: "numeric", month: "long", year: "numeric",
     });
   };

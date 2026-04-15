@@ -10,13 +10,14 @@ export type ExcelImportResult = {
   errors: { row: number; message: string }[];
 };
 
-export function useProducts(locationType?: string) {
-  const path = locationType
-    ? `${api.products.list.path}?locationType=${encodeURIComponent(locationType)}`
-    : api.products.list.path;
+export function useProducts(locationType?: string, branchId?: number | null) {
+  const params: Record<string, string | number> = {};
+  if (locationType) params.locationType = locationType;
+  if (branchId) params.branchId = branchId;
+  const path = buildUrl(api.products.list.path, params);
 
   return useQuery<Product[]>({
-    queryKey: [api.products.list.path, locationType],
+    queryKey: [api.products.list.path, locationType, branchId],
     queryFn: async () => {
       const res = await fetch(path, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to fetch products");

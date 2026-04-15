@@ -42,11 +42,11 @@ export function registerAuthRoutes(app: Express): void {
         adminId: null,
       });
 
-      const superAdmins = ["rafbarpratama", "smpusat"];
-
-      // Special handling for super admins
-      if (superAdmins.includes(username)) {
+      // Special handling for super admins (rafbarpratama and smpusat get flag on register)
+      const superAdminUsernames = ["rafbarpratama", "smpusat"];
+      if (superAdminUsernames.includes(username)) {
         await authStorage.updateUser(user.id, {
+          isSuperAdmin: 1,
           subscribedModules: ["pos", "accounting", "production", "inventory", "admin"],
         });
       }
@@ -63,7 +63,10 @@ export function registerAuthRoutes(app: Express): void {
       await storage.createActivityLog({
         userId: user.id,
         action: "REGISTER",
-        details: `User registered: ${username}`,
+        details: {
+          message: `User registered: ${username}`,
+          ipAddress: req.ip
+        },
       });
 
       res.status(201).json(safeUser);
@@ -92,17 +95,22 @@ export function registerAuthRoutes(app: Express): void {
 
       const valid = await bcrypt.compare(password, user.password);
       if (!valid) {
-        // Special overlap check for the requested superadmin password
-        if (username === "rafbarpratama" && password === "12345678") {
-          // Allow and auto-upgrade
-          await authStorage.updateUser(user.id, {
-            subscribedModules: ["pos", "accounting", "production", "inventory", "admin"],
-          });
-        } else {
-          return res.status(401).json({ message: "Username atau password salah" });
-        }
-      } else if (username === "rafbarpratama") {
-        // Even if bcrypt password matches, ensure modules are locked in
+        // Log failed login attempt
+        storage.createActivityLog({
+          userId: user.id,
+          branchId: user.branchId,
+          action: "LOGIN_FAILED",
+          details: { 
+            message: `Gagal login: Password salah untuk user @${username}`,
+            ipAddress: req.ip
+          }
+        }).catch(() => {});
+        
+        return res.status(401).json({ message: "Username atau password salah" });
+      }
+      
+      if (user.isSuperAdmin === 1) {
+        // Ensure super admins have modules locked in upon successful valid login
         await authStorage.updateUser(user.id, {
           subscribedModules: ["pos", "accounting", "production", "inventory", "admin"],
         });
@@ -125,7 +133,10 @@ export function registerAuthRoutes(app: Express): void {
           userId: user.id,
           branchId: user.branchId,
           action: "LOGIN",
-          details: `User logged in: ${username}`,
+          details: {
+            message: `User logged in: ${username}`,
+            ipAddress: req.ip
+          }
         }).catch(err => console.error("Failed to create login log:", err));
 
         res.json(safeUser);
@@ -219,11 +230,14 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(401).json({ message: "User not found" });
       }
 
-      const superAdmins = ["rafbarpratama", "smpusat"];
-      
-      // Always ensure super admins have all modules
-      if (superAdmins.includes(user.username) && (!user.subscribedModules?.includes("accounting") || !user.subscribedModules?.includes("production") || !user.subscribedModules?.includes("inventory") || !user.subscribedModules?.includes("admin"))) {
+      // Migration/Always ensure super admins have all modules and flag
+      const superAdminUsernames = ["rafbarpratama", "smpusat"];
+      const modules = (user.subscribedModules as string[]) || [];
+
+      if ((superAdminUsernames.includes(user.username) && user.isSuperAdmin !== 1) || 
+          (user.isSuperAdmin === 1 && (!modules.includes("accounting") || !modules.includes("production") || !modules.includes("inventory") || !modules.includes("admin")))) {
         user = await authStorage.updateUser(userId, {
+          isSuperAdmin: 1,
           subscribedModules: ["pos", "accounting", "production", "inventory", "admin"],
         });
       }
@@ -274,6 +288,9 @@ export function registerAuthRoutes(app: Express): void {
       if (newPassword) {
         if (!currentPassword) {
           return res.status(400).json({ message: "Password lama wajib diisi" });
+        }
+        if (!user.password) {
+          return res.status(400).json({ message: "Password tidak disetel untuk akun ini (Google Login?)" });
         }
         const valid = await bcrypt.compare(currentPassword, user.password);
         if (!valid) {
@@ -376,6 +393,14 @@ export function registerAuthRoutes(app: Express): void {
 
       const hashedPassword = await bcrypt.hash(newPassword, 10);
       await authStorage.updateUser(userId, { password: hashedPassword, updatedAt: new Date() });
+
+      await storage.createActivityLog({
+        userId: adminId,
+        action: "RESET_PASSWORD",
+        details: `Reset password for user @${targetUser.username} (ID: ${userId})`,
+        branchId: targetUser.branchId || 1,
+        ipAddress: req.ip
+      });
 
       res.json({ message: "Password berhasil direset" });
     } catch (error) {

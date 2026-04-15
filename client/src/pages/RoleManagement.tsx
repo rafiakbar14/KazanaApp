@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@shared/routes";
 import { useRole } from "@/hooks/use-role";
 import { useToast } from "@/hooks/use-toast";
-import { Shield, Loader2, Plus, AlertCircle, KeyRound } from "lucide-react";
+import { Shield, Loader2, Plus, AlertCircle, KeyRound, History as HistoryIcon } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -138,7 +138,7 @@ export default function RoleManagement() {
             onClick={() => setLocation("/admin/logs")}
             data-testid="button-view-logs"
           >
-            <History className="w-4 h-4 mr-2" />
+            <HistoryIcon className="w-4 h-4 mr-2" />
             Audit Log
           </Button>
           <CreateUserDialog open={isCreateOpen} onOpenChange={setIsCreateOpen} />
@@ -421,7 +421,7 @@ function CreateUserDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    createUser.mutate({ username, password, firstName, lastName, role });
+    createUser.mutate({ username, password, firstName, lastName, role, branchId: parseInt(branchId) });
   };
 
   return (
