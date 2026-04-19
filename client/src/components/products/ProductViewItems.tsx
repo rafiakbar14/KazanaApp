@@ -1,8 +1,12 @@
 import * as React from "react";
 import { memo, useState } from "react";
 import { 
-  Loader2, Package, ChevronDown, ChevronUp, Globe
+  Loader2, Package, ChevronDown, ChevronUp, Globe, 
+  Image as LucideImage, Trash2, Camera, Pencil, Layers, 
+  Save, X, Warehouse, Store, AlertTriangle
 } from "lucide-react";
+
+const ImageIcon = LucideImage;
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";

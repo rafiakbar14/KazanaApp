@@ -33,6 +33,7 @@ import { useState } from "react";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
 import { cn } from "@/lib/utils";
+import { CustomerDialog } from "@/components/CustomerDialog";
 
 interface CustomerWithStats {
     id: number;
@@ -262,10 +263,14 @@ export default function Customers() {
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
                 </div>
-                <Button className="h-14 px-8 bg-indigo-600 hover:bg-indigo-700 rounded-2xl shadow-xl shadow-indigo-200">
-                    <UserPlus className="w-5 h-5 mr-2" />
-                    Daftarkan Baru
-                </Button>
+                <CustomerDialog 
+                    trigger={
+                        <Button className="h-14 px-8 bg-indigo-600 hover:bg-indigo-700 rounded-2xl shadow-xl shadow-indigo-200">
+                            <UserPlus className="w-5 h-5 mr-2" />
+                            Daftarkan Baru
+                        </Button>
+                    }
+                />
             </div>
 
             {/* Content Area */}

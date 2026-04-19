@@ -13,7 +13,7 @@ if (!databaseUrl) {
 
 export default defineConfig({
   out: "./migrations",
-  schema: "./shared/schema.ts",
+  schema: ["./shared/schema.ts", "./shared/models/auth.ts"],
   dialect: "postgresql",
   dbCredentials: {
     url: databaseUrl,

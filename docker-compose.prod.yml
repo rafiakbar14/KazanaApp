@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: stockify-db-prod
+    restart: always
+    environment:
+      POSTGRES_DB: Qazanaid
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data_prod:/var/lib/postgresql/data
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: stockify-app-prod
+    restart: always
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:password@db:5432/Qazanaid
+      - NODE_ENV=production
+      - SESSION_SECRET=kazana-default-fallback-secret-2024
+    depends_on:
+      - db
+
+volumes:
+  postgres_data_prod:

@@ -20,14 +20,14 @@ interface RecordRowProps {
   isBackedUp?: boolean;
 }
 
-export const RecordRow = memo(({ 
-  record, 
-  sessionId, 
-  readOnly, 
-  isCompleted, 
-  isGudang, 
-  currentCounter, 
-  isBackedUp 
+export const RecordRow = memo(({
+  record,
+  sessionId,
+  readOnly,
+  isCompleted,
+  isGudang,
+  currentCounter,
+  isBackedUp
 }: RecordRowProps) => {
   const updateRecord = useUpdateRecord();
   const uploadPhoto = useUploadRecordPhoto();
@@ -39,7 +39,7 @@ export const RecordRow = memo(({
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [refPhotoOpen, setRefPhotoOpen] = useState(false);
   const [batchPhotoOpen, setBatchPhotoOpen] = useState(false);
-  
+
   const { jobs, addUploadJob } = useBackgroundUpload();
   const activeJob = jobs.find((j: any) => j.productId === record.productId && (j.status === "uploading" || j.status === "pending"));
 
@@ -97,7 +97,7 @@ export const RecordRow = memo(({
   const handleApply = useCallback(() => {
     const actualVal = parseInt(actual);
     const returnedVal = parseInt(returned) || 0;
-    
+
     updateRecord.mutate({
       sessionId,
       productId: record.productId,
@@ -136,7 +136,7 @@ export const RecordRow = memo(({
     });
 
     const returnedVal = parseInt(returned) || 0;
-    
+
     updateRecord.mutate({
       sessionId,
       productId: record.productId,
@@ -297,8 +297,8 @@ export const RecordRow = memo(({
                   data-testid={`input-count-${record.productId}`}
                 />
                 {!readOnly && (
-                  <Button 
-                    size="icon" 
+                  <Button
+                    size="icon"
                     variant={actual !== "" && parseInt(actual) !== record.actualStock ? "default" : "outline"}
                     className={cn(
                       "h-10 w-10 rounded-xl transition-all shadow-sm shrink-0",
@@ -368,7 +368,7 @@ export const RecordRow = memo(({
                   </div>
                 ))}
                 {allPhotos.length === 0 && record.photoUrl && (
-                   <button
+                  <button
                     onClick={() => { setLightboxIndex(0); setLightboxOpen(true); }}
                     className="relative group cursor-pointer"
                     data-testid={`button-view-photo-${record.productId}`}

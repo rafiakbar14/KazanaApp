@@ -1,7 +1,9 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Camera, X, Upload, Loader2, RotateCcw, Image as ImageIcon } from "lucide-react";
+import { Camera, X, Upload, Loader2, RotateCcw, Image as LucideImage } from "lucide-react";
+
+const ImageIcon = LucideImage;
 import { compressImage } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { useBackgroundUpload } from "@/components/BackgroundUpload";

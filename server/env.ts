@@ -16,8 +16,10 @@ try {
                 if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
                     value = value.substring(1, value.length - 1);
                 }
-                // ALWAYS use .env values to ensure synchronization with what user edits
-                process.env[key] = value;
+                // Use existing env if present (especially for Docker/PM2), fallback to .env
+                if (!process.env[key]) {
+                    process.env[key] = value;
+                }
             }
         });
         console.log("[env] File .env berhasil dimuat dan di-sinkronkan.");

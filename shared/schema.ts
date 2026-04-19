@@ -372,6 +372,7 @@ export const sales = pgTable("sales", {
   voucherId: integer("voucher_id").references(() => vouchers.id),
   pointsRedeemed: integer("points_redeemed").default(0).notNull(),
   pointsValueRedeemed: decimal("points_value_redeemed").default(0).notNull(),
+  orderId: text("order_id"), // Added for Report Hub compatibility
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -894,6 +895,8 @@ export const insertUnitSchema = createInsertSchema(units).omit({ id: true, creat
 export const insertActivityLogSchema = createInsertSchema(activityLogs).omit({ id: true, createdAt: true });
 export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true, createdAt: true });
 export const insertCustomerLoyaltyLedgerSchema = createInsertSchema(customerLoyaltyLedger).omit({ id: true, createdAt: true });
+export const insertStockTransferSchema = createInsertSchema(stockTransfers).omit({ id: true, createdAt: true });
+export const insertStockTransferItemSchema = createInsertSchema(stockTransferItems).omit({ id: true });
 
 
 
@@ -987,7 +990,9 @@ export type InsertPosRegistrationCode = typeof posRegistrationCodes.$inferInsert
 export type InboundItemPhoto = typeof inboundItemPhotos.$inferSelect;
 export type OutboundItemPhoto = typeof outboundItemPhotos.$inferSelect;
 export type StockTransfer = typeof stockTransfers.$inferSelect;
+export type InsertStockTransfer = z.infer<typeof insertStockTransferSchema>;
 export type StockTransferItem = typeof stockTransferItems.$inferSelect;
+export type InsertStockTransferItem = z.infer<typeof insertStockTransferItemSchema>;
 export type Supplier = typeof suppliers.$inferSelect;
 export type InsertSupplier = z.infer<typeof insertSupplierSchema>;
 export type ProductWithPhotosAndUnits = Product & { photos: ProductPhoto[]; units: ProductUnit[] };

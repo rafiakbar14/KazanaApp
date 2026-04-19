@@ -68,11 +68,6 @@ import SalesItems from "@/pages/reports/SalesItems";
 import NotFound from "@/pages/not-found";
 import { BackgroundUploadProvider } from "@/components/BackgroundUpload";
 
-declare global {
-  interface Window {
-    google: any;
-  }
-}
 import { POSProvider } from "@/hooks/use-pos";
 import { BranchProvider } from "@/hooks/use-branch";
 import { Loader2, Package, AlertCircle, Info, Megaphone, ChevronLeft, ChevronRight, Monitor, ShoppingCart } from "lucide-react";
@@ -154,11 +149,11 @@ function LoginPage() {
               if (res.ok) {
                 const user = await res.json();
                 queryClient.setQueryData(["/api/auth/user"], user);
-                
+
                 const qParams = new URLSearchParams(window.location.search);
                 const intent = qParams.get("intent");
                 const moduleToBuy = qParams.get("module");
-                
+
                 if (intent === "buy" && moduleToBuy) {
                   setLocation(`/subscription?module=${moduleToBuy}&autoCheckout=true`);
                 } else {
@@ -209,7 +204,7 @@ function LoginPage() {
       const qParams = new URLSearchParams(window.location.search);
       const intent = qParams.get("intent");
       const moduleToBuy = qParams.get("module");
-      
+
       if (intent === "buy" && moduleToBuy) {
         setLocation(`/subscription?module=${moduleToBuy}&autoCheckout=true`);
       } else if (authType === "register") {
@@ -566,7 +561,7 @@ function AnnouncementPopup() {
                 </Button>
                 <div className="flex gap-1">
                   {activeAnnouncements.map((_, idx) => (
-                    <div 
+                    <div
                       key={idx}
                       className={`h-1.5 transition-all duration-300 rounded-full ${idx === currentIndex ? 'w-6 bg-primary' : 'w-1.5 bg-primary/20'}`}
                     />
@@ -585,8 +580,8 @@ function AnnouncementPopup() {
               </>
             )}
           </div>
-          <Button 
-            onClick={dismissAll} 
+          <Button
+            onClick={dismissAll}
             className="rounded-xl h-11 px-8 font-bold bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20 transition-all active:scale-95 uppercase tracking-tight"
             data-testid="button-dismiss-announcements"
           >
@@ -610,10 +605,10 @@ function AuthenticatedApp() {
 
 
   useEffect(() => {
-    if (!isLoading && isCashier && !isPOS) {
+    if (!isLoading && isCashier && location === "/") {
       setLocation("/pos");
     }
-  }, [isCashier, isPOS, isLoading, setLocation]);
+  }, [isCashier, location, isLoading, setLocation]);
 
   if (isLoading) {
     return (
@@ -623,25 +618,21 @@ function AuthenticatedApp() {
     );
   }
 
-  if (isPOS) {
-    return (
-      <POSProvider>
+  return (
+    <>
+      {isPOS ? (
         <Switch>
           <Route path="/pos" component={POS} />
           <Route component={NotFound} />
         </Switch>
-      </POSProvider>
-    );
-  }
-
-  return (
-    <div className="min-h-screen bg-slate-50/50 flex flex-col lg:flex-row">
-      <Sidebar />
-      <main className="flex-1 p-4 lg:p-10 mt-14 lg:mt-0 overflow-y-auto h-screen">
-        <div className="max-w-7xl mx-auto">
+      ) : (
+        <div className="min-h-screen bg-slate-50/50 flex flex-col lg:flex-row">
+          <Sidebar />
+          <main className="flex-1 p-4 lg:p-10 mt-14 lg:mt-0 overflow-y-auto h-screen">
+            <div className="max-w-7xl mx-auto">
           <Switch>
             <Route path="/" component={Dashboard} />
-            
+
             {/* Master Data & Products */}
             <Route path="/products">
               <ProtectedRoute allowedRoles={["admin", "sku_manager", "production", "cashier"]}>
@@ -747,7 +738,7 @@ function AuthenticatedApp() {
             <Route path="/reports/sales-items" component={SalesItems} />
             <Route path="/customers" component={Customers} />
             <Route path="/subscription" component={SubscriptionPage} />
-            
+
             {/* Enterprise Routes */}
             <Route path="/admin/branches">
               <ProtectedRoute allowedRoles={["admin"]}>
@@ -803,34 +794,22 @@ function AuthenticatedApp() {
 
             <Route component={NotFound} />
           </Switch>
+            </div>
+          </main>
         </div>
-      </main>
-      <AnnouncementPopup />
-    </div>
+      )}
+    </>
   );
 }
 
 function Router() {
   const { isAuthenticated, isLoading } = useAuth();
-  const [location] = useLocation();
-  const isPOS = location.startsWith("/pos");
 
   if (isLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
-    );
-  }
-
-  if (isPOS) {
-    return (
-      <POSProvider>
-        <Switch>
-          <Route path="/pos" component={POS} />
-          <Route component={NotFound} />
-        </Switch>
-      </POSProvider>
     );
   }
 
@@ -842,16 +821,19 @@ function Router() {
 }
 
 function App() {
+  console.log("[App] Rendering...");
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
         <BranchProvider>
-          <BackgroundUploadProvider>
-            <Toaster />
-            <ErrorBoundary>
-              <Router />
-            </ErrorBoundary>
-          </BackgroundUploadProvider>
+          <POSProvider>
+            <BackgroundUploadProvider>
+              <Toaster />
+              <ErrorBoundary>
+                <Router />
+              </ErrorBoundary>
+            </BackgroundUploadProvider>
+          </POSProvider>
         </BranchProvider>
       </TooltipProvider>
     </QueryClientProvider>

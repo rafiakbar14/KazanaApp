@@ -418,12 +418,14 @@ function CreateSessionDialog({
                <div className="flex items-center justify-between pt-2">
                   <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Tim Auditor</span>
                   <div className="flex flex-wrap gap-2 justify-end max-w-xs">
-                      {filteredStaff.filter(s => selectedStaff.includes(String(s.id))).map((s, i, arr) => (
-                        <React.Fragment key={s.id}>
-                          <span className="text-xs font-black text-slate-700">{s.name}</span>
-                          {i < arr.length - 1 && <span className="text-slate-300">|</span>}
-                        </React.Fragment>
-                      ))}
+                      {(filteredStaff as StaffMember[])
+                        .filter(s => selectedStaff.includes(String(s.id)))
+                        .map((s, i, arr) => (
+                          <React.Fragment key={s.id}>
+                            <span className="text-xs font-black text-slate-700">{s.name}</span>
+                            {i < arr.length - 1 && <span className="text-slate-300">|</span>}
+                          </React.Fragment>
+                        ))}
                   </div>
                </div>
             </div>

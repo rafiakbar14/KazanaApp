@@ -24,8 +24,8 @@ export default function B2BWholesale() {
     queryKey: ["/api/products"],
   });
 
-  const filteredProducts = products?.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
+  const filteredProducts = products?.filter(p =>
+    p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     p.sku.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -66,15 +66,15 @@ export default function B2BWholesale() {
                   )}
                 </CardTitle>
                 <CardDescription className="text-slate-500 font-medium mt-1">
-                  {activeTab === "pricing" 
+                  {activeTab === "pricing"
                     ? "Tentukan diskon khusus berdasarkan jumlah pembelian (Volume Based Pricing)."
                     : "Gabungkan beberapa produk menjadi satu paket SKU dengan harga spesial."}
                 </CardDescription>
               </div>
               <div className="relative w-full md:w-80">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                <Input 
-                  placeholder="Cari produk..." 
+                <Input
+                  placeholder="Cari produk..."
                   className="pl-11 h-12 rounded-2xl border-slate-200 bg-slate-50/50 focus:bg-white transition-all shadow-inner"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
@@ -137,11 +137,10 @@ function TieredPricingList({ products, isLoading }: { products: Product[], isLoa
             <button
               key={p.id}
               onClick={() => setSelectedProduct(p)}
-              className={`w-full p-4 rounded-2xl text-left transition-all ${
-                selectedProduct?.id === p.id 
-                ? "bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-200" 
-                : "hover:bg-slate-50 text-slate-600"
-              }`}
+              className={`w-full p-4 rounded-2xl text-left transition-all ${selectedProduct?.id === p.id
+                  ? "bg-blue-50 text-blue-700 shadow-sm ring-1 ring-blue-200"
+                  : "hover:bg-slate-50 text-slate-600"
+                }`}
             >
               <div className="font-bold truncate">{p.name}</div>
               <div className="text-xs font-mono opacity-60">SKU: {p.sku}</div>
@@ -150,7 +149,7 @@ function TieredPricingList({ products, isLoading }: { products: Product[], isLoa
           ))}
         </div>
       </div>
-      
+
       <div className="lg:col-span-8 p-8 min-h-[500px] bg-slate-50/30">
         {selectedProduct ? (
           <div className="space-y-6">
@@ -198,9 +197,9 @@ function TieredPricingList({ products, isLoading }: { products: Product[], isLoa
                             </Badge>
                           </TableCell>
                           <TableCell className="text-right py-6 pr-8">
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               className="text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl"
                               onClick={() => deleteMutation.mutate(t.id)}
                             >
@@ -267,9 +266,9 @@ function AddTierDialog({ onAdd }: { onAdd: (qty: number, price: number) => void 
         <div className="space-y-6 p-4">
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Minimal Kuantitas</label>
-            <Input 
-              type="number" 
-              placeholder="Contoh: 10" 
+            <Input
+              type="number"
+              placeholder="Contoh: 10"
               className="h-14 rounded-2xl border-slate-100 bg-slate-50"
               value={qty}
               onChange={(e) => setQty(e.target.value)}
@@ -277,9 +276,9 @@ function AddTierDialog({ onAdd }: { onAdd: (qty: number, price: number) => void 
           </div>
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Harga Satuan Spesial</label>
-            <Input 
-              type="number" 
-              placeholder="Contoh: 75000" 
+            <Input
+              type="number"
+              placeholder="Contoh: 75000"
               className="h-14 rounded-2xl border-slate-100 bg-slate-50"
               value={price}
               onChange={(e) => setPrice(e.target.value)}
@@ -287,7 +286,7 @@ function AddTierDialog({ onAdd }: { onAdd: (qty: number, price: number) => void 
           </div>
         </div>
         <DialogFooter className="p-4 bg-slate-50/50">
-          <Button 
+          <Button
             className="w-full h-14 rounded-2xl bg-blue-600 hover:bg-blue-700 font-black text-lg shadow-xl shadow-blue-500/20 transition-all uppercase"
             onClick={() => {
               onAdd(Number(qty), Number(price));
@@ -344,11 +343,10 @@ function ProductBundlingList({ products, isLoading }: { products: Product[], isL
             <button
               key={p.id}
               onClick={() => setSelectedParent(p)}
-              className={`w-full p-4 rounded-2xl text-left transition-all ${
-                selectedParent?.id === p.id 
-                ? "bg-emerald-50 text-emerald-700 shadow-sm ring-1 ring-emerald-200" 
-                : "hover:bg-slate-50 text-slate-600"
-              }`}
+              className={`w-full p-4 rounded-2xl text-left transition-all ${selectedParent?.id === p.id
+                  ? "bg-emerald-50 text-emerald-700 shadow-sm ring-1 ring-emerald-200"
+                  : "hover:bg-slate-50 text-slate-600"
+                }`}
             >
               <div className="font-bold truncate">{p.name}</div>
               <div className="text-xs font-mono opacity-60">SKU: {p.sku}</div>
@@ -356,7 +354,7 @@ function ProductBundlingList({ products, isLoading }: { products: Product[], isL
           ))}
         </div>
       </div>
-      
+
       <div className="lg:col-span-8 p-8 min-h-[500px] bg-slate-50/30">
         {selectedParent ? (
           <div className="space-y-6">
@@ -365,9 +363,9 @@ function ProductBundlingList({ products, isLoading }: { products: Product[], isL
                 <h2 className="text-2xl font-black text-slate-900 uppercase">Komposisi Bundle: {selectedParent.name}</h2>
                 <p className="text-slate-500 font-medium">Add products that must be deducted when this bundle is sold.</p>
               </div>
-              <AddBundleItemDialog 
-                products={products.filter(p => p.id !== selectedParent.id)} 
-                onAdd={(childId, qty) => createMutation.mutate({ childProductId: childId, quantity: qty })} 
+              <AddBundleItemDialog
+                products={products.filter(p => p.id !== selectedParent.id)}
+                onAdd={(childId, qty) => createMutation.mutate({ childProductId: childId, quantity: qty })}
               />
             </div>
 
@@ -390,7 +388,7 @@ function ProductBundlingList({ products, isLoading }: { products: Product[], isL
                           key={item.id}
                           initial={{ opacity: 0, scale: 0.95 }}
                           animate={{ opacity: 1, scale: 1 }}
-                          exit={{ opacity: 0, opacity: 0 }}
+                          exit={{ opacity: 0 }}
                           className="group hover:bg-slate-50/50 transition-colors"
                         >
                           <TableCell className="py-6 pl-8 font-bold text-slate-700">
@@ -405,9 +403,9 @@ function ProductBundlingList({ products, isLoading }: { products: Product[], isL
                             <span className="font-black text-lg text-emerald-600">{item.quantity} Unit</span>
                           </TableCell>
                           <TableCell className="text-right py-6 pr-8">
-                            <Button 
-                              variant="ghost" 
-                              size="icon" 
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               className="text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl"
                               onClick={() => deleteMutation.mutate(item.id)}
                             >
@@ -436,7 +434,7 @@ function ProductBundlingList({ products, isLoading }: { products: Product[], isL
                 </TableBody>
               </Table>
             </div>
-            
+
             <div className="p-6 rounded-[2rem] bg-amber-50 border border-amber-100 flex gap-4">
               <div className="bg-amber-100 p-3 rounded-2xl flex-shrink-0">
                 <Percent className="w-6 h-6 text-amber-700" />
@@ -501,9 +499,9 @@ function AddBundleItemDialog({ products, onAdd }: { products: Product[], onAdd: 
           </div>
           <div className="space-y-2">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-widest ml-1">Kuantitas per Transaksi</label>
-            <Input 
-              type="number" 
-              placeholder="Contoh: 1" 
+            <Input
+              type="number"
+              placeholder="Contoh: 1"
               className="h-14 rounded-2xl border-slate-100 bg-slate-50"
               value={qty}
               onChange={(e) => setQty(e.target.value)}
@@ -511,7 +509,7 @@ function AddBundleItemDialog({ products, onAdd }: { products: Product[], onAdd: 
           </div>
         </div>
         <DialogFooter className="p-8 bg-slate-50/50">
-          <Button 
+          <Button
             className="w-full h-14 rounded-2xl bg-emerald-600 hover:bg-emerald-700 font-black text-lg shadow-xl shadow-emerald-500/20 transition-all uppercase"
             onClick={() => {
               if (selectedId && qty) {

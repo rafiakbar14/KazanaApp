@@ -35,8 +35,10 @@ export async function setupVite(server: Server, app: Express) {
     const url = req.originalUrl;
 
     try {
+      // Use process.cwd() or similar as fallback if both are missing
+      const baseDir = (typeof import.meta !== 'undefined' && import.meta.dirname) ? import.meta.dirname : __dirname;
       const clientTemplate = path.resolve(
-        import.meta.dirname,
+        baseDir,
         "..",
         "client",
         "index.html",

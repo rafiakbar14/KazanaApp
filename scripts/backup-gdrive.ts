@@ -147,11 +147,13 @@ if (help) {
     process.exit(0);
 }
 
-const __filename = fileURLToPath(import.meta.url);
-const isMain = process.argv[1] && (
-    fs.realpathSync(process.argv[1]) === fs.realpathSync(__filename) ||
-    process.argv[1].endsWith('backup-gdrive.ts')
-);
+const _filename = typeof import.meta !== 'undefined' && import.meta.url ? fileURLToPath(import.meta.url) : __filename;
+const isMain = process.argv[1] &&
+    !process.argv[1].endsWith('index.cjs') && // Don't run if we are in the production bundle
+    (
+        fs.realpathSync(process.argv[1]) === fs.realpathSync(_filename) ||
+        process.argv[1].endsWith('backup-gdrive.ts')
+    );
 
 if (isMain) {
     processBackup(sessionId ? Number(sessionId) : undefined, force)

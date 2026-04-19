@@ -3,18 +3,19 @@ import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Compatibility for both ESM and CJS
+const _filename = typeof import.meta.url !== 'undefined' ? fileURLToPath(import.meta.url) : __filename;
+const _dirname = path.dirname(_filename);
 
 export function serveStatic(app: Express) {
-  const distPath = path.resolve(__dirname, "..", "dist", "public");
+  const distPath = path.resolve(_dirname, "..", "dist", "public");
   // Check common locations for dist
   const possiblePaths = [
     distPath,
-    path.resolve(__dirname, "public"),
+    path.resolve(_dirname, "public"),
     path.resolve(process.cwd(), "dist", "public")
   ];
-  
+
   let finalPath = "";
   for (const p of possiblePaths) {
     if (fs.existsSync(p)) {

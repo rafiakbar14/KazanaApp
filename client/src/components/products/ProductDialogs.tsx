@@ -1,10 +1,12 @@
 import * as React from "react";
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { 
-  Plus, Camera, ImageIcon, X, Loader2, 
+  Plus, Camera, Image as LucideImage, X, Loader2, 
   Trash2, CheckCircle2, AlertTriangle, XCircle, 
   Pencil, Save, GripVertical 
 } from "lucide-react";
+
+const ImageIcon = LucideImage;
 import { 
   Dialog, DialogContent, DialogHeader, 
   DialogTitle, DialogTrigger, DialogDescription 

@@ -10,9 +10,10 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Separator } from "@/components/ui/separator";
-import { Loader2, Plus, Minus, Trash2, Search, ArrowLeft, Save, Printer } from "lucide-react";
+import { Loader2, Plus, Minus, Trash2, Search, ArrowLeft, Save, Printer, UserPlus } from "lucide-react";
 import { Link } from "wouter";
 import InvoicePrinter from "@/components/InvoicePrinter";
+import { CustomerDialog } from "@/components/CustomerDialog";
 import { format } from "date-fns";
 
 export default function NewInvoice() {
@@ -115,7 +116,18 @@ export default function NewInvoice() {
                         </CardHeader>
                         <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div className="space-y-2">
-                                <Label>Pilih Pelanggan</Label>
+                                <div className="flex items-center justify-between">
+                                    <Label>Pilih Pelanggan</Label>
+                                    <CustomerDialog 
+                                        trigger={
+                                            <Button type="button" variant="ghost" size="sm" className="h-6 px-2 text-indigo-600 hover:text-indigo-700 font-bold flex items-center gap-1">
+                                                <UserPlus className="w-3 h-3" />
+                                                Tambah Baru
+                                            </Button>
+                                        }
+                                        onSuccess={(newCustomer) => setSelectedCustomerId(newCustomer.id.toString())}
+                                    />
+                                </div>
                                 <Select value={selectedCustomerId} onValueChange={setSelectedCustomerId} required>
                                     <SelectTrigger className="h-12 rounded-xl">
                                         <SelectValue placeholder="Pilih pelanggan..." />

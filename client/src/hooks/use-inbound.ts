@@ -92,7 +92,10 @@ export function useAddInboundItem() {
                 credentials: "include",
             });
 
-            if (!res.ok) throw new Error("Failed to add item");
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.message || "Failed to add item");
+            }
             return res.json();
         },
         onSuccess: (_, { sessionId }) => {

@@ -1114,8 +1114,9 @@ export async function registerRoutes(
       const item = await storage.addInboundItem({ ...input, sessionId });
       res.status(201).json(item);
     } catch (err) {
+      console.error("[Inbound] Error adding item:", err);
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
-      res.status(500).json({ message: "Gagal menambah item" });
+      res.status(500).json({ message: `Gagal menambah item: ${(err as Error).message}` });
     }
   });
 
@@ -1447,50 +1448,9 @@ export async function registerRoutes(
 
 
 
-  // === Phase 19 & 20: Analytics & AI ===
-  app.get(api.analytics.stockHealth.path, isAuthenticated, async (req, res) => {
-    try {
-      const adminId = await getTeamAdminId(req);
-      const health = await storage.getStockHealth(adminId);
-      res.json(health);
-    } catch (err) {
-      console.error("Stock health error:", err);
-      res.status(500).json({ message: "Gagal memproses kesehatan stok" });
-    }
-  });
+  // === Phase 19 & 20: Analytics & AI (DUPLICATE) ===
 
-  app.get(api.analytics.categoryPerformance.path, isAuthenticated, async (req, res) => {
-    try {
-      const adminId = await getTeamAdminId(req);
-      const data = await storage.getCategoryPerformance(adminId);
-      res.json(data);
-    } catch (err) {
-      console.error("Category performance error:", err);
-      res.status(500).json({ message: "Gagal memproses performa kategori" });
-    }
-  });
 
-  app.get(api.analytics.aiInsights.path, isAuthenticated, async (req, res) => {
-    try {
-      const adminId = await getTeamAdminId(req);
-      
-      // Fetch some context for the AI
-      const health = await storage.getStockHealth(adminId);
-      const categories = await storage.getCategoryPerformance(adminId);
-      const demand = await storage.getInventoryDemand(adminId);
-
-      const insights = await generateBusinessInsights({
-        stockHealth: health,
-        categoryPerformance: categories,
-        turnoverRate: demand.slice(0, 10) // Only top 10 for tokens
-      });
-
-      res.json(insights);
-    } catch (err) {
-      console.error("AI Insights error:", err);
-      res.status(500).json({ message: "Gagal menghasilkan wawasan AI" });
-    }
-  });
 
   app.post(api.production.predict.path, isAuthenticated, requireRole("admin", "production"), async (req, res) => {
     try {
@@ -1750,11 +1710,19 @@ export async function registerRoutes(
       // Inject session for the authenticated user (cashier/admin)
       (req.session as any).userId = user.id;
 
-      res.json({
-        message: "PIN valid",
-        deviceName: device.name,
-        user: safeUser,
-        registered: true
+      // Ensure session is saved before response
+      req.session.save((err) => {
+        if (err) {
+          console.error("[pos] Verify PIN session save error:", err);
+          return res.status(500).json({ message: "Gagal menyimpan sesi kasir" });
+        }
+
+        res.json({
+          message: "PIN valid",
+          deviceName: device.name,
+          user: safeUser,
+          registered: true
+        });
       });
     } catch (err) {
       console.error("Verify PIN Error:", err);
@@ -1905,7 +1873,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post(api.transfers.create.path, isAuthenticated, async (req, res) => {
+  app.post(api.transfers.create.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const { items, ...transferData } = req.body;
@@ -1923,7 +1891,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post(api.transfers.receive.path, isAuthenticated, async (req, res) => {
+  app.post(api.transfers.receive.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
     try {
       const id = Number(req.params.id);
       const { receivedBy } = req.body;
@@ -2036,15 +2004,28 @@ export async function registerRoutes(
 
   app.post(api.pos.pettyCash.create.path, isAuthenticated, async (req, res) => {
     try {
+      const userId = getUserId(req);
       const { sessionId, amount, description, type } = req.body;
+      
+      // Audit: Verify session ownership and status
+      const activeSession = await storage.getActivePOSSession(userId);
+      if (!activeSession || activeSession.id !== Number(sessionId)) {
+        return res.status(403).json({ message: "Sesi tidak valid atau sudah ditutup. Anda tidak memiliki otorisasi untuk mencatat kas kecil di sesi ini." });
+      }
+
+      if (amount <= 0) {
+        return res.status(400).json({ message: "Jumlah kas kecil harus lebih dari nol." });
+      }
+
       const item = await storage.createPettyCash({
-        sessionId,
+        sessionId: Number(sessionId),
         amount: Number(amount),
         description,
         type
       });
       res.json(item);
     } catch (err) {
+      console.error("Petty Cash Error:", err);
       res.status(500).json({ message: "Gagal mencatat kas kecil" });
     }
   });
@@ -2136,7 +2117,7 @@ export async function registerRoutes(
   });
 
   // === Store Settings ===
-  app.get(api.settings.get.path, isAuthenticated, async (req, res) => {
+  app.get(api.settings.get.path, isAuthenticated, requireRole("admin"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const s = await storage.getSettings(adminId);
@@ -2390,7 +2371,7 @@ export async function registerRoutes(
     res.json(priorities);
   });
 
-  app.post(api.categoryPriorities.set.path, isAuthenticated, async (req, res) => {
+  app.post(api.categoryPriorities.set.path, isAuthenticated, requireRole("admin"), async (req, res) => {
     try {
       const userId = getUserId(req);
       const { priorities } = req.body as { priorities: { categoryName: string; sortOrder: number }[] };
@@ -2403,7 +2384,7 @@ export async function registerRoutes(
   });
 
   // === Phase 19: Analytics ===
-  app.get(api.analytics.stockHealth.path, isAuthenticated, async (req, res) => {
+  app.get(api.analytics.stockHealth.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const health = await storage.getStockHealth(adminId);
@@ -2413,7 +2394,7 @@ export async function registerRoutes(
     }
   });
 
-  app.get(api.analytics.aiInsights.path, isAuthenticated, async (req, res) => {
+  app.get(api.analytics.aiInsights.path, isAuthenticated, requireRole("admin"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const health = await storage.getStockHealth(adminId);
@@ -4413,59 +4394,6 @@ Tugas Anda:
     }
   });
 
-  // === Phase 16: RMA & Sales Returns ===
-  app.get(api.rma.list.path, isAuthenticated, async (req, res) => {
-    try {
-      const adminId = await getTeamAdminId(req);
-      const returns = await storage.getSalesReturns(adminId);
-      res.json(returns);
-    } catch (e) {
-      res.status(500).json({ message: "Gagal mengambil daftar retur" });
-    }
-  });
-
-  app.get('/api/rma/search', isAuthenticated, async (req, res) => {
-    try {
-      const { invoice } = req.query;
-      if (!invoice) return res.status(400).json({ message: "Invoice diperlukan" });
-      const { sales, customers, saleItems, products } = await import("@shared/schema");
-      const { eq } = await import("drizzle-orm");
-      const { db } = await import("./db");
-      const sale = await db.query.sales.findFirst({
-        where: eq(sales.invoiceNumber, String(invoice)),
-        with: {
-          customer: true,
-          items: {
-            with: { product: true }
-          }
-        }
-      });
-      if (!sale) return res.status(404).json({ message: "Invoice tidak ditemukan" });
-      res.json(sale);
-    } catch (e) {
-      res.status(500).json({ message: "Gagal mencari invoice" });
-    }
-  });
-
-  app.post(api.rma.create.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
-    try {
-      const adminId = await getTeamAdminId(req);
-      const newReturn = await storage.createSalesReturn({ ...req.body.returnData, userId: adminId }, req.body.items);
-
-      // Audit
-      await storage.createAuditLog({
-        action: "SALES_RETURN_CREATED",
-        entityType: "sales_return",
-        entityId: newReturn.id,
-        userId: adminId,
-        details: { saleId: req.body.returnData.saleId, reason: req.body.returnData.reason }
-      });
-
-      res.status(201).json(newReturn);
-    } catch (e) {
-      res.status(500).json({ message: "Gagal memproses retur" });
-    }
-  });
 
   // === Phase 20: Analytics & Forecasting ===
   app.get(api.analytics.inventoryDemand.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
@@ -4743,6 +4671,156 @@ Tugas Anda:
       res.json(diagnostics);
     } catch (e) {
       res.status(500).json({ message: "Diagnosis gagal" });
+    }
+  });
+
+  // === Phase 22: SaaS Console ===
+  const ALLOWED_SAAS_USERS = ["rafbarpratama", "smpusat"];
+  const saasAccessGuard = async (req: Request, res: Response, next: Function) => {
+    const userId = getUserId(req);
+    const user = await authStorage.getUser(userId);
+    if (user && user.isSuperAdmin === 1 && ALLOWED_SAAS_USERS.includes(user.username)) {
+      return next();
+    }
+    res.status(403).json({ message: "Akses ditolak: Hanya untuk Super Admin terpilih." });
+  };
+
+  app.get("/api/admin/saas/metrics", isAuthenticated, saasAccessGuard, async (req, res) => {
+    try {
+      const adminId = getUserId(req);
+      const metrics = await storage.getSaaSMetrics(adminId);
+      res.json({
+        totalModules: 12, // Still static as we have defined modules 
+        activeModules: 8,
+        ...metrics
+      });
+    } catch (e) {
+      res.status(500).json({ message: "Gagal mengambil metrik SaaS" });
+    }
+  });
+
+  app.get("/api/admin/saas/modules", isAuthenticated, saasAccessGuard, async (_req, res) => {
+    res.json([
+      { id: "1", name: "Inventory Core", description: "Manajemen stok dasar dan FIFO", price: 0, status: "active", users: 150, usage: 85, lastActive: new Date().toISOString(), icon: "inventory", category: "Core" },
+      { id: "2", name: "POS Pro", description: "Kasir offline-first dengan sinkronisasi", price: 250000, status: "active", users: 45, usage: 60, lastActive: new Date().toISOString(), icon: "pos", category: "Sales" },
+      { id: "3", name: "AI Analytics", description: "Prediksi demand dan wawasan bisnis", price: 500000, status: "pending", users: 12, usage: 30, lastActive: new Date().toISOString(), icon: "ai", category: "Intelligence" },
+      { id: "4", name: "Production AI", description: "Optimasi lini produksi dengan AI", price: 750000, status: "inactive", users: 0, usage: 0, lastActive: new Date().toISOString(), icon: "production", category: "Intelligence" }
+    ]);
+  });
+
+  app.get("/api/admin/saas/subscriptions", isAuthenticated, saasAccessGuard, async (req, res) => {
+    try {
+      const adminId = getUserId(req);
+      const subs = await storage.getModuleSubscriptions(adminId);
+      res.json(subs);
+    } catch (e) {
+      res.status(500).json({ message: "Gagal mengambil data langganan" });
+    }
+  });
+
+  app.get("/api/admin/saas/alerts", isAuthenticated, saasAccessGuard, async (req, res) => {
+    try {
+      const adminId = getUserId(req);
+      const logs = await storage.getSaaSActivityLogs(adminId);
+      
+      // Transform logs to alerts format if needed, or just return them
+      const alerts = logs.map(log => ({
+        id: log.id.toString(),
+        type: log.action.includes("ERROR") || log.action.includes("DELETE") ? "warning" : "info",
+        title: log.action,
+        message: typeof log.details === 'string' ? log.details : JSON.stringify(log.details),
+        timestamp: log.createdAt.toISOString(),
+        module: log.entityType || "System",
+        resolved: true
+      }));
+
+      res.json(alerts);
+    } catch (e) {
+      res.status(500).json({ message: "Gagal mengambil alert sistem" });
+    }
+  });
+
+  app.patch("/api/admin/saas/modules/:moduleId/status", isAuthenticated, saasAccessGuard, async (req, res) => {
+    res.json({ success: true, status: req.body.status });
+  });
+
+  // === Phase 23: Report Hub Routes ===
+  app.get("/api/reports/sales-summary", isAuthenticated, async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
+      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
+      const summary = await storage.getSalesSummary(adminId, startDate, endDate);
+      res.json(summary);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal mengambil ringkasan penjualan" });
+    }
+  });
+
+  app.get("/api/reports/sales-items", isAuthenticated, async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const sortBy = (req.query.sortBy as string) || "revenue";
+      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
+      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
+      const report = await storage.getSalesItemsReport(adminId, sortBy, startDate, endDate);
+      res.json(report);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal mengambil laporan item penjualan" });
+    }
+  });
+
+  app.get("/api/reports/export", isAuthenticated, async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const type = req.query.type as string; // 'summary' | 'items'
+      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
+      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
+
+      const wb = XLSX.utils.book_new();
+      
+      if (type === "summary") {
+        const summary = await storage.getSalesSummary(adminId, startDate, endDate);
+        const data = [
+          ["Metrik", "Nilai"],
+          ["Total Omzet", summary.revenue],
+          ["Total HPP (COGS)", summary.cogs],
+          ["Laba Kotor", summary.grossProfit],
+          ["Total Diskon", summary.discount],
+          ["Total Pajak", summary.tax],
+          ["Jumlah Transaksi", summary.transactionCount],
+          ["Rata-rata Nilai Order", summary.averageOrderValue]
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(data);
+        XLSX.utils.book_append_sheet(wb, ws, "Ringkasan Penjualan");
+      } else {
+        const report = await storage.getSalesItemsReport(adminId, "revenue", startDate, endDate);
+        const headers = ["Rank", "SKU", "Nama Produk", "Qty Terjual", "Total Omzet", "Total Profit"];
+        const rows = report.map((item, idx) => [
+          idx + 1, item.sku, item.name, item.qty, item.revenue, item.profit
+        ]);
+        const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+        XLSX.utils.book_append_sheet(wb, ws, "Performa Produk");
+      }
+
+      const buf = XLSX.write(wb, { type: "buffer", bookType: "xlsx" });
+      res.setHeader("Content-Disposition", `attachment; filename=report_${type}.xlsx`);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.send(buf);
+    } catch (err) {
+      console.error("Export Error:", err);
+      res.status(500).json({ message: "Gagal mengekspor laporan" });
+    }
+  });
+
+  app.get("/api/reports/stock-ledger", isAuthenticated, async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const productId = req.query.productId ? Number(req.query.productId) : undefined;
+      const ledger = await storage.getStockLedger(adminId, productId);
+      res.json(ledger);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal mengambil kartu stok" });
     }
   });
 

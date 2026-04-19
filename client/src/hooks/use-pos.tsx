@@ -20,14 +20,8 @@ interface POSContextType {
     isLoadingCustomers: boolean;
     selectedCustomerId: number | null;
     setSelectedCustomerId: (id: number | null) => void;
-    discount: number;
-    setDiscount: (val: number) => void;
     pointsRedeemed: number;
     setPointsRedeemed: (val: number) => void;
-    discountType: 'fixed' | 'percentage';
-    setDiscountType: (val: 'fixed' | 'percentage') => void;
-    itemDiscounts: Record<number, { value: number, type: 'fixed' | 'percentage' }>;
-    updateItemDiscount: (productId: number, value: number, type: 'fixed' | 'percentage') => void;
     paymentMethod: string;
     setPaymentMethod: (method: string) => void;
     isVerified: boolean;
@@ -73,10 +67,7 @@ export function POSProvider({ children }: { children: ReactNode }) {
     const { toast } = useToast();
     const [cart, setCart] = useState<CartItem[]>([]);
     const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
-    const [discount, setDiscount] = useState<number>(0);
-    const [discountType, setDiscountType] = useState<'fixed' | 'percentage'>('fixed');
     const [pointsRedeemed, setPointsRedeemed] = useState<number>(0);
-    const [itemDiscounts, setItemDiscounts] = useState<Record<number, { value: number, type: 'fixed' | 'percentage' }>>({});
     const [paymentMethod, setPaymentMethod] = useState<string>("cash");
     const [isVerified, setIsVerified] = useState<boolean>(() => {
         try {
@@ -133,12 +124,13 @@ export function POSProvider({ children }: { children: ReactNode }) {
 
     const { data: customers, isLoading: isLoadingCustomers } = useQuery<Customer[]>({
         queryKey: [api.pos.customers.list.path],
-        enabled: isVerified,
+        // Enabled for both POS terminal (verified) and ERP dashboard (auth)
+        enabled: true,
     });
 
     const { data: categories } = useQuery<string[]>({
         queryKey: [api.products.categories.path],
-        enabled: isVerified,
+        enabled: true,
     });
 
     const [selectedCategory, setSelectedCategory] = useState<string>("Semua");
@@ -148,7 +140,7 @@ export function POSProvider({ children }: { children: ReactNode }) {
         enabled: isVerified,
     });
 
-    const { data: tieredPrices } = useQuery<TieredPricing[]>({
+    const { data: tieredPrices } = useQuery<any[]>({
         queryKey: ["/api/pricing/tiered"],
         enabled: isVerified,
     });
@@ -169,7 +161,13 @@ export function POSProvider({ children }: { children: ReactNode }) {
         queryFn: async () => {
             const res = await fetch(api.pos.sessions.active.path);
             if (res.status === 401) {
-                logout();
+                // Prevent infinite recursive logout calls if called within the same render cycle
+                // Adding a small delay to ensure session has time to sync and state to settle
+                if (isVerified) {
+                    setTimeout(() => {
+                        logout();
+                    }, 500);
+                }
                 return null;
             }
             if (!res.ok) return null;
@@ -201,7 +199,7 @@ export function POSProvider({ children }: { children: ReactNode }) {
         });
     }, [promotions]);
 
-    const addToCart = (product: Product, qty: number = 1) => {
+    const addToCart = useCallback((product: Product, qty: number = 1) => {
         setCart(prev => {
             const existing = prev.find(item => item.id === product.id);
             if (existing) {
@@ -213,13 +211,13 @@ export function POSProvider({ children }: { children: ReactNode }) {
             }
             return [...prev, { ...product, quantity: qty }];
         });
-    };
+    }, []);
 
-    const removeFromCart = (productId: number) => {
+    const removeFromCart = useCallback((productId: number) => {
         setCart(prev => prev.filter(item => item.id !== productId));
-    };
+    }, []);
 
-    const updateQuantity = (productId: number, qty: number) => {
+    const updateQuantity = useCallback((productId: number, qty: number) => {
         if (qty <= 0) {
             removeFromCart(productId);
             return;
@@ -227,15 +225,14 @@ export function POSProvider({ children }: { children: ReactNode }) {
         setCart(prev => prev.map(item =>
             item.id === productId ? { ...item, quantity: qty } : item
         ));
-    };
+    }, [removeFromCart]);
 
-    const clearCart = () => {
+    const clearCart = useCallback(() => {
         setCart([]);
         setSelectedCustomerId(null);
-        setDiscount(0);
         setAppliedVoucher(null);
         setPointsRedeemed(0);
-    };
+    }, []);
 
     const [appliedVoucher, setAppliedVoucher] = useState<any>(null);
     const [lastSale, setLastSale] = useState<any>(null);
@@ -273,17 +270,6 @@ export function POSProvider({ children }: { children: ReactNode }) {
                 appliedPromoId = promo.id;
             }
 
-            // 2. Manual Item Discount (Overwrites promo)
-            const manual = itemDiscounts[item.id];
-            if (manual) {
-                if (manual.type === 'percentage') {
-                    itemDiscount = basePrice * (manual.value / 100);
-                } else {
-                    itemDiscount = manual.value;
-                }
-                appliedPromoId = null; // Manual override
-            }
-
             // Secure item discounts (Cannot discount more than the price itself)
             if (itemDiscount > basePrice) {
                 itemDiscount = basePrice; 
@@ -300,13 +286,6 @@ export function POSProvider({ children }: { children: ReactNode }) {
         const subtotalAfterItems = Math.max(0, itemsSubtotal - itemsDiscount);
         const tax = subtotalAfterItems * 0.11;
 
-        let billDiscount = 0;
-        if (discountType === 'percentage') {
-            billDiscount = subtotalAfterItems * (discount / 100);
-        } else {
-            billDiscount = discount;
-        }
-
         let voucherDiscount = 0;
         if (appliedVoucher) {
             if (subtotalAfterItems >= (appliedVoucher.minPurchase || 0)) {
@@ -318,13 +297,10 @@ export function POSProvider({ children }: { children: ReactNode }) {
             }
         }
 
-        // Secure bill/voucher discounts
-        let finalDiscounts = billDiscount + voucherDiscount;
-        
         // 3. Customer Loyalty Points Discount (Phase 17)
         const pointsDiscount = pointsRedeemed; // 1 Poin = Rp 1
         
-        const totalBeforePoints = subtotalAfterItems + tax - finalDiscounts;
+        const totalBeforePoints = subtotalAfterItems + tax - voucherDiscount;
         const total = Math.max(0, totalBeforePoints - pointsDiscount);
 
         return {
@@ -332,11 +308,11 @@ export function POSProvider({ children }: { children: ReactNode }) {
             tax,
             total,
             itemsDiscount,
-            billDiscount: finalDiscounts,
+            billDiscount: voucherDiscount,
             pointsDiscount,
             cartWithDiscounts
         };
-    }, [cart, discount, discountType, itemDiscounts, activePromos, appliedVoucher, pointsRedeemed]);
+    }, [cart, activePromos, appliedVoucher, pointsRedeemed, tieredPrices]);
 
     const startSessionMutation = useMutation({
         mutationFn: async (data: { openingBalance: number, notes?: string }) => {
@@ -354,13 +330,13 @@ export function POSProvider({ children }: { children: ReactNode }) {
         }
     });
 
-    const logout = () => {
+    const logout = useCallback(() => {
         setIsVerified(false);
         setCurrentCashier(null);
         sessionStorage.removeItem("pos_verified");
         sessionStorage.removeItem("pos_cashier");
         clearCart();
-    };
+    }, [clearCart]);
 
     const closeSessionMutation = useMutation({
         mutationFn: async (data: { id: number, closingBalance: number, actualCash: number, notes?: string }) => {
@@ -524,12 +500,12 @@ export function POSProvider({ children }: { children: ReactNode }) {
         enabled: !!activeSession?.id
     });
 
-    const resumePendingSale = (ps: any) => {
+    const resumePendingSale = useCallback((ps: any) => {
         const savedCart = JSON.parse(ps.cartData);
         setCart(savedCart);
         fetch(api.pos.pendingSales.delete.path.replace(":id", ps.id.toString()), { method: "DELETE" })
             .then(() => queryClient.invalidateQueries({ queryKey: [api.pos.sessions.pendingSales.list.path] }));
-    };
+    }, []);
 
     const validateVoucher = async (code: string) => {
         try {
@@ -551,9 +527,7 @@ export function POSProvider({ children }: { children: ReactNode }) {
         }
     };
 
-    const updateItemDiscount = useCallback((productId: number, value: number, type: 'fixed' | 'percentage') => {
-        setItemDiscounts(prev => ({ ...prev, [productId]: { value, type } }));
-    }, []);
+    // updateItemDiscount removed
 
     const checkout = useCallback((saleData?: any) => createSaleMutation.mutateAsync({
         sale: {
@@ -597,14 +571,8 @@ export function POSProvider({ children }: { children: ReactNode }) {
         isLoadingCustomers,
         selectedCustomerId,
         setSelectedCustomerId,
-        discount,
-        setDiscount,
-        discountType,
-        setDiscountType,
         pointsRedeemed,
         setPointsRedeemed,
-        itemDiscounts,
-        updateItemDiscount,
         paymentMethod,
         setPaymentMethod,
         isVerified,
@@ -643,8 +611,8 @@ export function POSProvider({ children }: { children: ReactNode }) {
         cashiers,
         isLoadingCashiers
     }), [
-        cart, totals, customers, isLoadingCustomers, selectedCustomerId, discount, discountType, pointsRedeemed, itemDiscounts, 
-        updateItemDiscount, paymentMethod, isVerified, currentCashier, checkout, createSaleMutation.isPending,
+        cart, totals, customers, isLoadingCustomers, selectedCustomerId, pointsRedeemed,
+        paymentMethod, isVerified, currentCashier, checkout, createSaleMutation.isPending,
         createCustomer, createCustomerMutation.isPending, verifyPin, verifyPinMutation.isPending, logout, 
         deviceId, currentDevice, registerDevice, registerDeviceMutation.isPending, isLoadingDevice, 
         activeSession, isLoadingSession, startSession, closeSession, createPettyCash, pendingSales, 

@@ -11,8 +11,11 @@ import {
   Calendar,
   ExternalLink,
   Loader2,
-  PackageCheck
+  PackageCheck,
+  UserPlus
 } from "lucide-react";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -43,6 +46,12 @@ export default function PurchaseOrder() {
   // New PO State
   const [supplierId, setSupplierId] = useState<string>("");
   const [items, setItems] = useState<{ productId: number; quantityOrdered: number; unitPrice: number }[]>([]);
+
+  // Quick Add Supplier State
+  const [isSupplierDialogOpen, setIsSupplierDialogOpen] = useState(false);
+  const [newSupplierName, setNewSupplierName] = useState("");
+  const [newSupplierContact, setNewSupplierContact] = useState("");
+  const [newSupplierPhone, setNewSupplierPhone] = useState("");
 
   const { data: pos = [], isLoading: isLoadingPO } = useQuery<any[]>({
     queryKey: [api.procurement.list.path],
@@ -103,6 +112,91 @@ export default function PurchaseOrder() {
     },
   });
 
+  const createSupplierMutation = useMutation({
+    mutationFn: async (data: any) => {
+      const res = await fetch(api.procurement.suppliers.create.path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) throw new Error("Gagal menambah supplier");
+      return res.json();
+    },
+    onSuccess: (newSupplier) => {
+      queryClient.invalidateQueries({ queryKey: [api.procurement.suppliers.list.path] });
+      setSupplierId(newSupplier.id.toString());
+      setIsSupplierDialogOpen(false);
+      setNewSupplierName("");
+      setNewSupplierContact("");
+      setNewSupplierPhone("");
+      toast({ title: "Supplier Ditambah", description: "Pemasok baru telah berhasil didaftarkan." });
+    },
+  });
+
+  const exportToPDF = (po: any) => {
+    try {
+      console.log("[PDF] Exporting PO:", po.poNumber);
+      const doc = new jsPDF();
+      const dateStr = format(new Date(po.createdAt), "dd MMM yyyy");
+
+      // Header
+      doc.setFontSize(20);
+      doc.setTextColor(40);
+      doc.text("PURCHASE ORDER", 105, 20, { align: "center" });
+
+      doc.setFontSize(10);
+      doc.text(`Nomor PO: ${po.poNumber}`, 14, 30);
+      doc.text(`Tanggal: ${dateStr}`, 14, 35);
+
+      // Supplier Box
+      doc.setDrawColor(200);
+      doc.rect(14, 45, 182, 30);
+      doc.setFontSize(12);
+      doc.setFont("helvetica", "bold");
+      doc.text("DITUJUKAN KEPADA:", 18, 52);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      doc.text(`Supplier: ${po.supplierName}`, 18, 60);
+      doc.text(`Status: ${po.status.toUpperCase()}`, 18, 65);
+
+      // Table
+      const tableData = po.items.map((item: any) => [
+        item.product?.name || "Unknown Product",
+        item.product?.sku || "-",
+        item.quantityOrdered,
+        `Rp ${Number(item.unitPrice).toLocaleString()}`,
+        `Rp ${(item.quantityOrdered * Number(item.unitPrice)).toLocaleString()}`
+      ]);
+
+      autoTable(doc, {
+        startY: 85,
+        head: [["Nama Produk", "SKU", "Qty", "Harga Satuan", "Subtotal"]],
+        body: tableData,
+        theme: "grid",
+        headStyles: { fillColor: [59, 130, 246] }
+      });
+
+      const finalY = (doc as any).lastAutoTable?.finalY || 100;
+      doc.setFont("helvetica", "bold");
+      doc.text(`ESTIMASI TOTAL: Rp ${Number(po.totalAmount).toLocaleString()}`, 196, finalY + 10, { align: "right" });
+
+      // Footer
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "italic");
+      doc.text("Dokumen ini dihasilkan secara otomatis oleh Stockify ERP.", 105, 285, { align: "center" });
+
+      doc.save(`${po.poNumber}.pdf`);
+      toast({ title: "PDF Berhasil", description: "Dokumen PO sedang diunduh." });
+    } catch (err: any) {
+      console.error("[PDF] Error:", err);
+      toast({ 
+        title: "Gagal Cetak PDF", 
+        description: `Error: ${err.message || "Unknown error"}. Silakan cek konsol (F12).`,
+        variant: "destructive"
+      });
+    }
+  };
+
   const addItem = (productId: number) => {
     const p = products.find(x => x.id === productId);
     if (!p || items.find(i => i.productId === productId)) return;
@@ -151,14 +245,27 @@ export default function PurchaseOrder() {
               <DialogTitle className="text-2xl font-bold">New Purchase Order</DialogTitle>
             </DialogHeader>
             <div className="space-y-6 pt-4">
-              <div className="space-y-2">
+               <div className="space-y-2">
                 <Label>Pilih Supplier</Label>
-                <Select onValueChange={(v) => setSupplierId(v)}>
-                  <SelectTrigger><SelectValue placeholder="Pilih Pemasok..." /></SelectTrigger>
-                  <SelectContent>
-                    {suppliers.map(s => <SelectItem key={s.id} value={s.id.toString()}>{s.name} {s.contactPerson ? `(${s.contactPerson})` : ''}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <div className="flex gap-2">
+                  <Select onValueChange={(v) => setSupplierId(v)} value={supplierId}>
+                    <SelectTrigger className="flex-1">
+                      <SelectValue placeholder="Pilih Pemasok..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {suppliers.map(s => <SelectItem key={s.id} value={s.id.toString()}>{s.name} {s.contactPerson ? `(${s.contactPerson})` : ''}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    size="icon" 
+                    className="shrink-0"
+                    onClick={() => setIsSupplierDialogOpen(true)}
+                  >
+                    <Plus className="w-4 h-4" />
+                  </Button>
+                </div>
               </div>
 
               <div className="space-y-4">
@@ -250,7 +357,12 @@ export default function PurchaseOrder() {
                     
                     {po.status !== 'completed' && (
                         <div className="ml-auto flex gap-2">
-                             <Button size="sm" variant="outline" className="rounded-xl">
+                             <Button 
+                                size="sm" 
+                                variant="outline" 
+                                className="rounded-xl"
+                                onClick={() => exportToPDF(po)}
+                             >
                                 <ExternalLink className="w-4 h-4 mr-2" />
                                 Cetak PDF
                              </Button>
@@ -270,8 +382,46 @@ export default function PurchaseOrder() {
               </div>
             </CardContent>
           </Card>
-        ))}
+         ))}
       </div>
+
+      {/* Quick Add Supplier Dialog */}
+      <Dialog open={isSupplierDialogOpen} onOpenChange={setIsSupplierDialogOpen}>
+        <DialogContent className="max-w-md rounded-3xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="w-5 h-5 text-blue-600" />
+              Tambah Supplier Cepat
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <Label>Nama Pemasok / Perusahaan</Label>
+              <Input value={newSupplierName} onChange={(e) => setNewSupplierName(e.target.value)} placeholder="Contoh: PT Sumber Rezeki" />
+            </div>
+            <div className="space-y-2">
+              <Label>Nama Kontak (CP)</Label>
+              <Input value={newSupplierContact} onChange={(e) => setNewSupplierContact(e.target.value)} placeholder="Contoh: Bpk. Budi" />
+            </div>
+            <div className="space-y-2">
+              <Label>Nomor WhatsApp / Telepon</Label>
+              <Input value={newSupplierPhone} onChange={(e) => setNewSupplierPhone(e.target.value)} placeholder="0812..." />
+            </div>
+            <Button 
+              className="w-full bg-blue-600 mt-2" 
+              disabled={!newSupplierName || createSupplierMutation.isPending}
+              onClick={() => createSupplierMutation.mutate({
+                name: newSupplierName,
+                contactPerson: newSupplierContact,
+                phone: newSupplierPhone,
+                active: 1
+              })}
+            >
+              {createSupplierMutation.isPending ? <Loader2 className="animate-spin" /> : "Simpan Supplier"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

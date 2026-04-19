@@ -289,7 +289,10 @@ export default function SaaSConsole() {
         }
     };
 
-    if (!user || (user as any).role !== "admin") {
+    const ALLOWED_USERS = ["rafbarpratama", "smpusat"];
+    const isAllowed = user && user.isSuperAdmin === 1 && ALLOWED_USERS.includes(user.username);
+
+    if (!isAllowed) {
         return (
             <div className="flex items-center justify-center h-screen">
                 <Card className="w-full max-w-md">

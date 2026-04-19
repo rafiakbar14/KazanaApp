@@ -337,6 +337,8 @@ export const api = {
       input: createInsertSchema(inboundItems).omit({
         id: true,
         sessionId: true,
+      }).extend({
+        expiryDate: z.coerce.date().nullable().optional(),
       }),
     },
     removeItem: {
