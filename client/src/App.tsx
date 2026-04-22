@@ -1,18 +1,22 @@
 import { useState, useEffect, useCallback } from "react";
 import { Switch, Route, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
+
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Sidebar } from "@/components/Sidebar";
 import { useAuth } from "@/hooks/use-auth";
+import { useToast } from "@/hooks/use-toast";
 import { useAnnouncements } from "@/hooks/use-announcements";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import Dashboard from "@/pages/Dashboard";
 import Products from "@/pages/Products";
 import Sessions from "@/pages/Sessions";
 import SessionDetail from "@/pages/SessionDetail";
+import StoreSetup from "@/pages/StoreSetup";
 import RoleManagement from "@/pages/RoleManagement";
+
 import ActivityLogs from "@/pages/ActivityLogs";
 import SessionHub from "@/pages/SessionHub";
 import InboundSessions from "@/pages/InboundSessions";
@@ -27,6 +31,7 @@ import MotivationPage from "@/pages/MotivationPage";
 import BOMList from "@/pages/BOMList";
 import BOMDetail from "@/pages/BOMDetail";
 import AssemblySessions from "@/pages/AssemblySessions";
+import AssemblySessionDetail from "@/pages/AssemblySessionDetail";
 import ProductionAI from "@/pages/ProductionAI";
 import POS from "@/pages/POS";
 import Accounts from "@/pages/accounting/Accounts";
@@ -66,16 +71,26 @@ import StockLedger from "@/pages/reports/StockLedger";
 import SalesSummary from "@/pages/reports/SalesSummary";
 import SalesItems from "@/pages/reports/SalesItems";
 import NotFound from "@/pages/not-found";
+import LandingPage from "@/pages/LandingPage";
+import BusinessSolutionPage from "@/pages/front/BusinessSolutionPage";
+import FeaturesPage from "@/pages/front/FeaturesPage";
+import PricingPage from "@/pages/front/PricingPage";
+import BlogPage from "@/pages/front/BlogPage";
+import ContactPage from "@/pages/front/ContactPage";
 import { BackgroundUploadProvider } from "@/components/BackgroundUpload";
 
 import { POSProvider } from "@/hooks/use-pos";
 import { BranchProvider } from "@/hooks/use-branch";
-import { Loader2, Package, AlertCircle, Info, Megaphone, ChevronLeft, ChevronRight, Monitor, ShoppingCart } from "lucide-react";
+import { api } from "@shared/routes";
+
+import { Loader2, Package, AlertCircle, Info, Megaphone, ChevronLeft, ChevronRight, Monitor, ShoppingCart, Box, Lock, Mail, Phone, Key, User as UserIcon } from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
-import type { Announcement } from "@shared/schema";
+import type { Announcement, Settings } from "@shared/schema";
+
 import { useRole } from "@/hooks/use-role";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import React from "react";
@@ -116,21 +131,24 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { has
 }
 
 function LoginPage() {
-  const { login, register, loginError, registerError, isLoggingIn, isRegistering } = useAuth();
-  const [location, setLocation] = useLocation();
-  const queryParams = new URLSearchParams(window.location.search);
-  const initialMode = (queryParams.get("mode") as "admin" | "register") || "choice";
-
-  const [authType, setAuthType] = useState<"choice" | "admin" | "register">(initialMode as any);
+  const [authType, setAuthType] = useState<"admin" | "register" | "verify" | "forgot" | "reset">("admin");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
-  const [showForgotInfo, setShowForgotInfo] = useState(false);
+  const [otpCode, setOtpCode] = useState("");
+  const [resetIdentifier, setResetIdentifier] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [isResetPending, setIsResetPending] = useState(false);
+
+  const { login, register, verifyOtp, loginError, registerError, verifyOtpError, isLoggingIn, isRegistering, isVerifying } = useAuth();
+  const { toast } = useToast();
+  const [location, setLocation] = useLocation();
 
   useEffect(() => {
     /* global google */
-    if (authType === "choice") return;
 
     let checkInterval: NodeJS.Timeout;
 
@@ -156,6 +174,8 @@ function LoginPage() {
 
                 if (intent === "buy" && moduleToBuy) {
                   setLocation(`/subscription?module=${moduleToBuy}&autoCheckout=true`);
+                } else if (window.location.pathname === "/pos") {
+                  setLocation("/pos");
                 } else {
                   setLocation("/");
                 }
@@ -183,8 +203,10 @@ function LoginPage() {
       return false;
     };
 
-    if (!tryInitGoogle()) {
-      checkInterval = setInterval(tryInitGoogle, 500);
+    if (authType !== "verify") {
+      if (!tryInitGoogle()) {
+        checkInterval = setInterval(tryInitGoogle, 500);
+      }
     }
 
     return () => {
@@ -195,30 +217,80 @@ function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      if (authType === "admin" || authType === "choice") {
+      if (authType === "admin") {
         await login({ username, password });
-      } else {
-        await register({ username, password, firstName, lastName });
+      } else if (authType === "register") {
+        await register({ username, password, email, phone, firstName, lastName });
+        setAuthType("verify");
+        toast({
+          title: "Kode OTP Terkirim",
+          description: "Silakan cek email Anda untuk mendapatkan kode verifikasi.",
+        });
+      } else if (authType === "verify") {
+        await verifyOtp({ email, code: otpCode, username, password, phone, firstName, lastName });
+      } else if (authType === "forgot") {
+        setIsResetPending(true);
+        const res = await fetch("/api/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifier: resetIdentifier }),
+        });
+        setIsResetPending(false);
+        if (res.ok) {
+          toast({ title: "OTP Reset Terkirim", description: "Silakan cek email Anda untuk kode reset password." });
+          setAuthType("reset");
+        } else {
+          const err = await res.json();
+          toast({ title: "Gagal", description: err.message, variant: "destructive" });
+        }
+        return;
+      } else if (authType === "reset") {
+        setIsResetPending(true);
+        const res = await fetch("/api/auth/reset-password-otp", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifier: resetIdentifier, code: otpCode, newPassword }),
+        });
+        setIsResetPending(false);
+        if (res.ok) {
+          toast({ title: "Berhasil!", description: "Password Anda telah diperbarui. Silakan login." });
+          setAuthType("admin");
+          setUsername(resetIdentifier);
+        } else {
+          const err = await res.json();
+          toast({ title: "Gagal Reset", description: err.message, variant: "destructive" });
+        }
+        return;
       }
 
       const qParams = new URLSearchParams(window.location.search);
       const intent = qParams.get("intent");
       const moduleToBuy = qParams.get("module");
 
-      if (intent === "buy" && moduleToBuy) {
-        setLocation(`/subscription?module=${moduleToBuy}&autoCheckout=true`);
-      } else if (authType === "register") {
-        setLocation("/subscription");
-      } else {
-        setLocation("/");
+      if (authType === "admin") {
+        if (intent === "buy" && moduleToBuy) {
+          setLocation(`/subscription?module=${moduleToBuy}&autoCheckout=true`);
+        } else if (window.location.pathname === "/pos") {
+          setLocation("/pos");
+        } else {
+          setLocation("/");
+        }
       }
     } catch (err) {
-      // errors are handled by useAuth hook
+      // errors are handled by showing UI messages
     }
   };
 
-  const error = authType === "register" ? registerError : loginError;
-  const isPending = authType === "register" ? isRegistering : isLoggingIn;
+  const getTitle = () => {
+    if (authType === "register") return "Daftar Akun Baru";
+    if (authType === "verify") return "Verifikasi Email";
+    if (authType === "forgot") return "Lupa Password";
+    if (authType === "reset") return "Reset Password";
+    return "Login Akun";
+  };
+
+  const error = authType === "admin" ? loginError : (authType === "register" ? registerError : verifyOtpError);
+  const isPending = authType === "admin" ? isLoggingIn : (authType === "register" ? isRegistering : isVerifying);
 
   return (
     <div className="min-h-screen grid grid-cols-1 lg:grid-cols-2 bg-[#0044CC] overflow-hidden font-sans">
@@ -246,61 +318,17 @@ function LoginPage() {
       {/* Right Side: Login Content */}
       <div className="flex flex-col items-center justify-center p-6 lg:p-12 relative overflow-y-auto">
         <div className="w-full max-w-md z-10">
-          {authType === "choice" ? (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
-              <div className="text-center mb-10">
-                <h1 className="text-4xl font-black text-white mb-3 tracking-tighter">SELAMAT DATANG</h1>
-                <p className="text-blue-200/60 font-medium">Pilih akses sistem yang Anda butuhkan</p>
-              </div>
-
-              <div className="grid grid-cols-1 gap-6">
-                <button
-                  onClick={() => setAuthType("admin")}
-                  className="group relative bg-white/10 hover:bg-white/15 backdrop-blur-xl border border-white/20 rounded-[2rem] p-8 text-left transition-all hover:scale-[1.02] active:scale-95 shadow-2xl"
-                >
-                  <div className="flex items-center gap-6">
-                    <div className="w-16 h-16 bg-blue-500 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-500/20 group-hover:scale-110 transition-transform">
-                      <Monitor className="w-8 h-8 text-white" />
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-bold text-white">Dashboard Admin</h3>
-                      <p className="text-blue-200/50 text-sm font-medium">Kelola Stok, User, & Laporan</p>
-                    </div>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => setLocation("/pos")}
-                  className="group relative bg-white/10 hover:bg-white/15 backdrop-blur-xl border border-white/20 rounded-[2rem] p-8 text-left transition-all hover:scale-[1.02] active:scale-95 shadow-2xl"
-                >
-                  <div className="flex items-center gap-6">
-                    <div className="w-16 h-16 bg-emerald-500 rounded-2xl flex items-center justify-center shadow-lg shadow-emerald-500/20 group-hover:scale-110 transition-transform">
-                      <ShoppingCart className="w-8 h-8 text-white" />
-                    </div>
-                    <div>
-                      <h3 className="text-xl font-bold text-white">Terminal Kasir (POS)</h3>
-                      <p className="text-emerald-200/50 text-sm font-medium">Input Penjualan & Print Struk</p>
-                    </div>
-                  </div>
-                </button>
-              </div>
-
-              <p className="text-center text-white/20 text-xs font-mono tracking-widest uppercase pt-8">Powered by Kazana AI Engine</p>
-            </div>
-          ) : (
-            <div className="bg-white/10 backdrop-blur-2xl border border-white/20 rounded-[2.5rem] p-8 lg:p-12 shadow-[0_20px_50px_rgba(0,0,0,0.3)] animate-in zoom-in-95 duration-500">
-              <button
-                onClick={() => setAuthType("choice")}
-                className="mb-8 flex items-center text-blue-200/60 hover:text-white transition-colors text-sm font-bold uppercase tracking-widest gap-2"
-              >
-                <ChevronLeft className="w-4 h-4" /> Kembali
-              </button>
-
+          <div className="bg-white/10 backdrop-blur-2xl border border-white/20 rounded-[2.5rem] p-8 lg:p-12 shadow-[0_20px_50px_rgba(0,0,0,0.3)] animate-in zoom-in-95 duration-500">
               <div className="mb-10 text-center lg:text-left">
                 <h2 className="text-3xl lg:text-4xl font-black text-white mb-2 tracking-tighter uppercase">
-                  {authType === "admin" ? "Admin Login" : "Daftar Akun"}
+                  {getTitle()}
                 </h2>
-                <p className="text-blue-200/60 font-medium">Masukkan kredensial Anda untuk masuk</p>
+                <p className="text-blue-200/60 font-medium">
+                  {authType === "verify" ? `Masukkan kode yang dikirim ke ${email}` : 
+                   authType === "forgot" ? "Masukkan identifier akun Anda untuk menerima OTP" :
+                   authType === "reset" ? "Masukkan kode OTP dan password baru Anda" :
+                   "Masukkan kredensial Anda untuk masuk"}
+                </p>
               </div>
 
               <form onSubmit={handleSubmit} className="space-y-6">
@@ -311,84 +339,181 @@ function LoginPage() {
                   </div>
                 )}
 
-                {authType === "register" && (
-                  <div className="grid grid-cols-2 gap-4">
+                {authType === "verify" ? (
+                  <div className="space-y-4">
+                    <label className="text-xs font-bold text-white/70 uppercase tracking-wider ml-1">Kode Verifikasi (6 Digit)</label>
+                    <Input
+                      value={otpCode}
+                      onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="XXXXXX"
+                      className="bg-white/5 border-white/10 text-white text-center text-2xl tracking-[10px] h-20 rounded-2xl focus:ring-blue-500/50 placeholder:text-white/30"
+                      required
+                    />
+                    <p className="text-xs text-blue-200/50 text-center italic">Cek kotak masuk atau spam email Anda.</p>
+                  </div>
+                ) : authType === "forgot" ? (
+                  <div className="space-y-4">
                     <div className="space-y-2">
-                      <label className="text-xs font-bold text-blue-200/80 uppercase tracking-wider ml-1">Nama Depan</label>
-                      <Input
-                        value={firstName}
-                        onChange={(e) => setFirstName(e.target.value)}
-                        placeholder="John"
-                        className="bg-white/5 border-white/10 text-white placeholder:text-white/30 h-14 rounded-2xl focus:ring-blue-500/50"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="text-xs font-bold text-white/70 uppercase tracking-wider ml-1">Nama Belakang</label>
-                      <Input
-                        value={lastName}
-                        onChange={(e) => setLastName(e.target.value)}
-                        placeholder="Doe"
-                        className="bg-white/5 border-white/10 text-white placeholder:text-white/30 h-14 rounded-2xl focus:ring-blue-500/50"
-                      />
+                       <label className="text-xs font-bold text-white/70 uppercase tracking-wider ml-1">Username / Email / HP</label>
+                       <Input
+                         value={resetIdentifier}
+                         onChange={(e) => setResetIdentifier(e.target.value)}
+                         placeholder="Masukkan identifier Anda"
+                         className="bg-white/5 border-white/10 text-white h-14 rounded-2xl focus:ring-blue-500/50 placeholder:text-white/30"
+                         required
+                       />
                     </div>
                   </div>
+                ) : authType === "reset" ? (
+                  <div className="space-y-6">
+                    <div className="space-y-2">
+                       <label className="text-xs font-bold text-white/70 uppercase tracking-wider ml-1">Username / Email / HP</label>
+                       <Input
+                         value={resetIdentifier}
+                         disabled
+                         className="bg-white/5 border-white/10 text-white/50 h-14 rounded-2xl"
+                       />
+                    </div>
+                    <div className="space-y-2">
+                       <label className="text-xs font-bold text-white/70 uppercase tracking-wider ml-1">Kode OTP Reset</label>
+                       <Input
+                         value={otpCode}
+                         onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                         placeholder="XXXXXX"
+                         className="bg-white/5 border-white/10 text-white text-center text-lg h-14 rounded-2xl focus:ring-blue-500/50"
+                         required
+                       />
+                    </div>
+                    <div className="space-y-2">
+                       <label className="text-xs font-bold text-white/70 uppercase tracking-wider ml-1">Password Baru</label>
+                       <Input
+                         type="password"
+                         value={newPassword}
+                         onChange={(e) => setNewPassword(e.target.value)}
+                         placeholder="Min 8 karakter"
+                         className="bg-white/5 border-white/10 text-white h-14 rounded-2xl focus:ring-blue-500/50"
+                         required
+                       />
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {authType === "register" && (
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-blue-200/80 uppercase tracking-wider ml-1">Nama Depan</label>
+                          <Input
+                            value={firstName}
+                            onChange={(e) => setFirstName(e.target.value)}
+                            placeholder="John"
+                            className="bg-white/5 border-white/10 text-white placeholder:text-white/30 h-14 rounded-2xl focus:ring-blue-500/50"
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-white/70 uppercase tracking-wider ml-1">Nama Belakang</label>
+                          <Input
+                            value={lastName}
+                            onChange={(e) => setLastName(e.target.value)}
+                            placeholder="Doe"
+                            className="bg-white/5 border-white/10 text-white placeholder:text-white/30 h-14 rounded-2xl focus:ring-blue-500/50"
+                            required
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-white/70 uppercase tracking-wider ml-1">
+                        {authType === "admin" ? "Username / Email / HP" : "Username"}
+                      </label>
+                      <Input
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                        placeholder="Contoh: budi atau budi@email.com"
+                        className="bg-white/5 border-white/10 text-white h-14 rounded-2xl focus:ring-blue-500/50 placeholder:text-white/30"
+                        required
+                      />
+                    </div>
+
+                    {authType === "register" && (
+                      <div className="space-y-4">
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-white/70 uppercase tracking-wider ml-1">Email Utama</label>
+                          <Input
+                            type="email"
+                            value={email}
+                            onChange={(e) => setEmail(e.target.value)}
+                            placeholder="budi@email.com"
+                            className="bg-white/5 border-white/10 text-white h-14 rounded-2xl focus:ring-blue-500/50 placeholder:text-white/30"
+                            required
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="text-xs font-bold text-white/70 uppercase tracking-wider ml-1">Nomor HP</label>
+                          <Input
+                            value={phone}
+                            onChange={(e) => setPhone(e.target.value)}
+                            placeholder="0812xxxxxxxx"
+                            className="bg-white/5 border-white/10 text-white h-14 rounded-2xl focus:ring-blue-500/50 placeholder:text-white/30"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center ml-1">
+                        <label className="text-xs font-bold text-white/70 uppercase tracking-wider">Password</label>
+                        {authType === "admin" && (
+                          <button
+                            type="button"
+                            className="text-xs font-medium text-blue-200 hover:text-white transition-colors"
+                            onClick={() => setAuthType("forgot")}
+                          >
+                            Lupa?
+                          </button>
+                        )}
+                      </div>
+                      <Input
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="Password"
+                        className="bg-white/5 border-white/10 text-white h-14 rounded-2xl focus:ring-blue-500/50 placeholder:text-white/30"
+                        required
+                      />
+                    </div>
+                  </>
                 )}
 
-                <div className="space-y-2">
-                  <label className="text-xs font-bold text-white/70 uppercase tracking-wider ml-1">Username</label>
-                  <Input
-                    value={username}
-                    onChange={(e) => setUsername(e.target.value)}
-                    placeholder="Masukkan username"
-                    className="bg-white/5 border-white/10 text-white h-14 rounded-2xl focus:ring-blue-500/50 placeholder:text-white/30"
-                    autoComplete="username"
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center ml-1">
-                    <label className="text-xs font-bold text-white/70 uppercase tracking-wider">Password</label>
-                    {authType === "admin" && (
-                      <button
-                        type="button"
-                        className="text-xs font-medium text-blue-200 hover:text-white transition-colors"
-                        onClick={() => setShowForgotInfo(true)}
-                      >
-                        Lupa?
-                      </button>
-                    )}
-                  </div>
-                  <Input
-                    type="password"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Password"
-                    className="bg-white/5 border-white/10 text-white h-14 rounded-2xl focus:ring-blue-500/50 placeholder:text-white/30"
-                    autoComplete={authType === "admin" ? "current-password" : "new-password"}
-                    required
-                  />
-                </div>
 
                 <Button
                   type="submit"
                   className="w-full h-14 bg-white text-[#0044CC] hover:bg-white/90 font-black text-lg rounded-2xl shadow-2xl shadow-black/20 transition-all active:scale-95 uppercase tracking-tight"
-                  disabled={isPending}
+                  disabled={isPending || isResetPending}
                 >
-                  {isPending && <Loader2 className="w-5 h-5 mr-3 animate-spin" />}
-                  {authType === "admin" ? "Masuk Sekarang" : "Buat Akun"}
+                  {(isPending || isResetPending) && <Loader2 className="w-5 h-5 mr-3 animate-spin" />}
+                  {authType === "admin" ? "Masuk Sekarang" : 
+                   authType === "verify" ? "Konfirmasi Kode" : 
+                   authType === "forgot" ? "Kirim OTP Reset" :
+                   authType === "reset" ? "Reset Password" :
+                   "Daftar & Kirim OTP"}
                 </Button>
 
-                <div className="relative my-6">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t border-white/10"></span>
-                  </div>
-                  <div className="relative flex justify-center text-sm uppercase tracking-widest font-bold">
-                    <span className="px-4 bg-[#0044CC]/20 text-blue-200/60 text-[10px] backdrop-blur-md rounded-full">Atau</span>
-                  </div>
-                </div>
+                {authType !== "verify" && (
+                  <>
+                    <div className="relative my-6">
+                      <div className="absolute inset-0 flex items-center">
+                        <span className="w-full border-t border-white/10"></span>
+                      </div>
+                      <div className="relative flex justify-center text-sm uppercase tracking-widest font-bold">
+                        <span className="px-4 bg-[#0044CC]/20 text-blue-200/60 text-[10px] backdrop-blur-md rounded-full">Atau</span>
+                      </div>
+                    </div>
 
-                <div id="googleBtn" className="w-full flex justify-center"></div>
+                    <div id="googleBtn" className="w-full flex justify-center h-[52px]"></div>
+                  </>
+                )}
 
                 <div className="text-center pt-4">
                   <p className="text-sm text-blue-200/60 font-medium">
@@ -403,6 +528,14 @@ function LoginPage() {
                           Daftar
                         </button>
                       </>
+                    ) : authType === "forgot" || authType === "reset" ? (
+                      <button
+                        type="button"
+                        className="text-white font-bold hover:underline"
+                        onClick={() => setAuthType("admin")}
+                      >
+                        Kembali ke Login
+                      </button>
                     ) : (
                       <>
                         Sudah punya akun?{" "}
@@ -419,31 +552,10 @@ function LoginPage() {
                 </div>
               </form>
             </div>
-          )}
         </div>
       </div>
 
-      <Dialog open={showForgotInfo} onOpenChange={setShowForgotInfo}>
-        <DialogContent className="sm:max-w-[400px] bg-[#002D70] text-white border-white/20">
-          <DialogHeader>
-            <DialogTitle>Lupa Password?</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 pt-2">
-            <div className="flex gap-3 p-4 rounded-lg bg-white/5 border border-white/10">
-              <Info className="w-5 h-5 text-blue-300 shrink-0 mt-0.5" />
-              <div className="space-y-2 text-sm text-blue-200/80">
-                <p>Hubungi <strong className="text-white font-bold">Admin</strong> tim Anda untuk mereset password.</p>
-                <p>Admin dapat mereset password Anda melalui halaman <strong className="text-white font-bold">User Roles</strong>.</p>
-              </div>
-            </div>
-            <div className="flex justify-end">
-              <Button variant="outline" className="text-white border-white/20 hover:bg-white/10" onClick={() => setShowForgotInfo(false)} data-testid="button-close-forgot">
-                Tutup
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+
     </div>
   );
 }
@@ -603,6 +715,26 @@ function AuthenticatedApp() {
     console.log("[App] Authenticated Client State:", { user: user?.username, role, location });
   }, [user, role, location]);
 
+  const { data: settings, isLoading: settingsLoading } = useQuery<Settings>({
+    queryKey: [api.settings.get.path],
+    queryFn: async () => {
+      const res = await fetch(api.settings.get.path);
+      if (!res.ok) throw new Error("Gagal mengambil pengaturan");
+      return res.json();
+    },
+    enabled: !!user && !user.adminId,
+  });
+
+  useEffect(() => {
+    if (!settingsLoading && settings && user && !user.adminId && location !== "/setup" && !location.startsWith("/subscription")) {
+      const s = settings as any;
+      if (!s.storeName || !s.storePhone || !s.storeEmail || s.storeName === "Kazana Shop") {
+        setLocation("/setup");
+      }
+    }
+  }, [settings, settingsLoading, user, location, setLocation]);
+
+
 
   useEffect(() => {
     if (!isLoading && isCashier && location === "/") {
@@ -618,6 +750,27 @@ function AuthenticatedApp() {
     );
   }
 
+  const isSetup = location === "/setup";
+  const isSubscription = location.startsWith("/subscription");
+
+  if (isSetup) {
+    return (
+      <Switch>
+        <Route path="/setup" component={StoreSetup} />
+        <Route component={NotFound} />
+      </Switch>
+    );
+  }
+
+  if (isSubscription) {
+    return (
+      <Switch>
+        <Route path="/subscription" component={SubscriptionPage} />
+        <Route component={NotFound} />
+      </Switch>
+    );
+  }
+
   return (
     <>
       {isPOS ? (
@@ -630,170 +783,171 @@ function AuthenticatedApp() {
           <Sidebar />
           <main className="flex-1 p-4 lg:p-10 mt-14 lg:mt-0 overflow-y-auto h-screen">
             <div className="max-w-7xl mx-auto">
-          <Switch>
-            <Route path="/" component={Dashboard} />
+              <Switch>
+                <Route path="/" component={Dashboard} />
 
-            {/* Master Data & Products */}
-            <Route path="/products">
-              <ProtectedRoute allowedRoles={["admin", "sku_manager", "production", "cashier"]}>
-                <Products />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/master">
-              <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
-                <MasterData />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/master/categories">
-              <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
-                <Categories />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/master/units">
-              <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
-                <Units />
-              </ProtectedRoute>
-            </Route>
+                {/* Master Data & Products */}
+                <Route path="/products">
+                  <ProtectedRoute allowedRoles={["admin", "sku_manager", "production", "cashier"]}>
+                    <Products />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/master">
+                  <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
+                    <MasterData />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/master/categories">
+                  <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
+                    <Categories />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/master/units">
+                  <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
+                    <Units />
+                  </ProtectedRoute>
+                </Route>
 
-            {/* Admin & Security */}
-            <Route path="/roles">
-              <ProtectedRoute allowedRoles={["admin"]}>
-                <RoleManagement />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/session-hub">
-              <ProtectedRoute allowedRoles={["admin"]}>
-                <SessionHub />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/admin/logs">
-              <ProtectedRoute allowedRoles={["admin"]}>
-                <ActivityLogs />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/staff">
-              <ProtectedRoute allowedRoles={["admin"]}>
-                <StaffManagement />
-              </ProtectedRoute>
-            </Route>
+                {/* Admin & Security */}
+                <Route path="/roles">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <RoleManagement />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/session-hub">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <SessionHub />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/admin/logs">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <ActivityLogs />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/staff">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <StaffManagement />
+                  </ProtectedRoute>
+                </Route>
 
-            <Route path="/accounting">
-              <ProtectedRoute allowedRoles={["admin"]}>
-                <AccountingOverview />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/accounting/accounts">
-              <ProtectedRoute allowedRoles={["admin"]}>
-                <Accounts />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/accounting/journal">
-              <ProtectedRoute allowedRoles={["admin"]}>
-                <Journal />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/accounting/reports">
-              <ProtectedRoute allowedRoles={["admin"]}>
-                <Reports />
-              </ProtectedRoute>
-            </Route>
+                <Route path="/accounting">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <AccountingOverview />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/accounting/accounts">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <Accounts />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/accounting/journal">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <Journal />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/accounting/reports">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <Reports />
+                  </ProtectedRoute>
+                </Route>
 
-            {/* Production */}
-            <Route path="/production/boms">
-              <ProtectedRoute allowedRoles={["admin", "production"]}>
-                <BOMList />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/production/ai">
-              <ProtectedRoute allowedRoles={["admin", "production"]}>
-                <ProductionAI />
-              </ProtectedRoute>
-            </Route>
+                {/* Production */}
+                <Route path="/production/boms">
+                  <ProtectedRoute allowedRoles={["admin", "production"]}>
+                    <BOMList />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/production/ai">
+                  <ProtectedRoute allowedRoles={["admin", "production"]}>
+                    <ProductionAI />
+                  </ProtectedRoute>
+                </Route>
 
-            <Route path="/sessions" component={Sessions} />
-            <Route path="/sessions/:id" component={SessionDetail} />
-            <Route path="/admin/terminals" component={TerminalManagement} />
-            <Route path="/admin/promotions" component={PromotionManagement} />
-            <Route path="/admin/pos-sessions" component={POSSessions} />
-            <Route path="/inbound" component={InboundSessions} />
-            <Route path="/inbound/:id" component={InboundDetail} />
-            <Route path="/outbound" component={OutboundSessions} />
-            <Route path="/outbound/:id" component={OutboundDetail} />
-            <Route path="/profile" component={Profile} />
-            <Route path="/announcements" component={Announcements} />
-            <Route path="/feedback" component={FeedbackPage} />
-            <Route path="/motivation" component={MotivationPage} />
-            <Route path="/production/boms/:id" component={BOMDetail} />
-            <Route path="/production/assembly" component={AssemblySessions} />
-            <Route path="/accounting/assets" component={Assets} />
-            <Route path="/accounting/inventory-valuation" component={InventoryValuation} />
-            <Route path="/sales/invoices" component={Invoices} />
-            <Route path="/sales/invoices/new" component={NewInvoice} />
-            <Route path="/master/barcode" component={BarcodeGenerator} />
-            <Route path="/master/import-export" component={MasterImportExport} />
-            <Route path="/reports" component={ReportHub} />
-            <Route path="/reports/export" component={ReportsExport} />
-            <Route path="/reports/stock-ledger" component={StockLedger} />
-            <Route path="/reports/sales-summary" component={SalesSummary} />
-            <Route path="/reports/sales-items" component={SalesItems} />
-            <Route path="/customers" component={Customers} />
-            <Route path="/subscription" component={SubscriptionPage} />
+                <Route path="/sessions" component={Sessions} />
+                <Route path="/sessions/:id" component={SessionDetail} />
+                <Route path="/admin/terminals" component={TerminalManagement} />
+                <Route path="/admin/promotions" component={PromotionManagement} />
+                <Route path="/admin/pos-sessions" component={POSSessions} />
+                <Route path="/inbound" component={InboundSessions} />
+                <Route path="/inbound/:id" component={InboundDetail} />
+                <Route path="/outbound" component={OutboundSessions} />
+                <Route path="/outbound/:id" component={OutboundDetail} />
+                <Route path="/profile" component={Profile} />
+                <Route path="/announcements" component={Announcements} />
+                <Route path="/feedback" component={FeedbackPage} />
+                <Route path="/motivation" component={MotivationPage} />
+                <Route path="/production/boms/:id" component={BOMDetail} />
+                <Route path="/production/assembly" component={AssemblySessions} />
+                <Route path="/production/assembly/:id" component={AssemblySessionDetail} />
+                <Route path="/accounting/assets" component={Assets} />
+                <Route path="/accounting/inventory-valuation" component={InventoryValuation} />
+                <Route path="/sales/invoices" component={Invoices} />
+                <Route path="/sales/invoices/new" component={NewInvoice} />
+                <Route path="/master/barcode" component={BarcodeGenerator} />
+                <Route path="/master/import-export" component={MasterImportExport} />
+                <Route path="/reports" component={ReportHub} />
+                <Route path="/reports/export" component={ReportsExport} />
+                <Route path="/reports/stock-ledger" component={StockLedger} />
+                <Route path="/reports/sales-summary" component={SalesSummary} />
+                <Route path="/reports/sales-items" component={SalesItems} />
+                <Route path="/customers" component={Customers} />
 
-            {/* Enterprise Routes */}
-            <Route path="/admin/branches">
-              <ProtectedRoute allowedRoles={["admin"]}>
-                <BranchManagement />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/admin/backup">
-              <ProtectedRoute allowedRoles={["admin"]}>
-                <BackupCenter />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/logistics/transfers" component={StockTransfer} />
-            <Route path="/master/suppliers">
-              <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
-                <Suppliers />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/purchasing/po">
-              <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
-                <PurchaseOrder />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/sales/returns" component={SalesReturns} />
-            <Route path="/accounting/analytics" component={DemandAnalytics} />
-            <Route path="/accounting/insights">
-              <ProtectedRoute allowedRoles={["admin"]}>
-                <SmartInsights />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/sales/b2b">
-              <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
-                <B2BWholesale />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/logistics/hub">
-              <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
-                <LogisticsHub />
-              </ProtectedRoute>
-            </Route>
 
-            {/* Finance & Admin Extensions */}
-            <Route path="/accounting/finance">
-              <ProtectedRoute allowedRoles={["admin"]}>
-                <CashLedger />
-              </ProtectedRoute>
-            </Route>
-            <Route path="/admin/petty-cash" component={PettyCashReport} />
-            <Route path="/admin/saas-console">
-              <ProtectedRoute allowedRoles={["admin"]}>
-                <SaaSConsole />
-              </ProtectedRoute>
-            </Route>
+                {/* Enterprise Routes */}
+                <Route path="/admin/branches">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <BranchManagement />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/admin/backup">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <BackupCenter />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/logistics/transfers" component={StockTransfer} />
+                <Route path="/master/suppliers">
+                  <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
+                    <Suppliers />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/purchasing/po">
+                  <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
+                    <PurchaseOrder />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/sales/returns" component={SalesReturns} />
+                <Route path="/accounting/analytics" component={DemandAnalytics} />
+                <Route path="/accounting/insights">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <SmartInsights />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/sales/b2b">
+                  <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
+                    <B2BWholesale />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/logistics/hub">
+                  <ProtectedRoute allowedRoles={["admin", "sku_manager"]}>
+                    <LogisticsHub />
+                  </ProtectedRoute>
+                </Route>
 
-            <Route component={NotFound} />
-          </Switch>
+                {/* Finance & Admin Extensions */}
+                <Route path="/accounting/finance">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <CashLedger />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/admin/petty-cash" component={PettyCashReport} />
+                <Route path="/admin/saas-console">
+                  <ProtectedRoute allowedRoles={["admin"]}>
+                    <SaaSConsole />
+                  </ProtectedRoute>
+                </Route>
+
+                <Route component={NotFound} />
+              </Switch>
             </div>
           </main>
         </div>
@@ -814,7 +968,23 @@ function Router() {
   }
 
   if (!isAuthenticated) {
-    return <LoginPage />;
+    return (
+      <Switch>
+        <Route path="/login" component={LoginPage} />
+        
+        {/* Front Web Routes */}
+        <Route path="/" component={LandingPage} />
+        <Route path="/solusi/:type" component={BusinessSolutionPage} />
+        <Route path="/features" component={FeaturesPage} />
+        <Route path="/pricing" component={PricingPage} />
+        <Route path="/blog" component={BlogPage} />
+        <Route path="/mitra" component={ContactPage} />
+        <Route path="/karir" component={ContactPage} />
+        <Route path="/kontak" component={ContactPage} />
+        
+        <Route component={LandingPage} />
+      </Switch>
+    );
   }
 
   return <AuthenticatedApp />;

@@ -176,3 +176,28 @@ export function useSaveInboundSignatures() {
         },
     });
 }
+
+export function usePayAccountsPayable() {
+    const queryClient = useQueryClient();
+    const { toast } = useToast();
+
+    return useMutation({
+        mutationFn: async (id: number) => {
+            const url = `/api/inbound-sessions/${id}/pay`;
+            const res = await fetch(url, { method: "POST", credentials: "include" });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.message || "Failed to pay supplier tagihan");
+            }
+            return res.json();
+        },
+        onSuccess: (data, id) => {
+            queryClient.invalidateQueries({ queryKey: [api.inbound.get.path, id] });
+            queryClient.invalidateQueries({ queryKey: [api.inbound.list.path] });
+            toast({ title: "Pembayaran Berhasil", description: data.message });
+        },
+        onError: (error) => {
+            toast({ title: "Gagal Membayar", description: error.message, variant: "destructive" });
+        },
+    });
+}

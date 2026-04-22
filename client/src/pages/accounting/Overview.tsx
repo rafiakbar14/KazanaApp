@@ -8,7 +8,10 @@ import { Progress } from "@/components/ui/progress";
 import { useRole } from "@/hooks/use-role";
 import { useLocation } from "wouter";
 import { cn } from "@/lib/utils";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { format } from "date-fns";
+import { id as idLocale } from "date-fns/locale";
 
 export default function Accounting() {
     const { isAdmin, isLoading: roleLoading } = useRole();
@@ -21,6 +24,21 @@ export default function Accounting() {
     const { data: journalEntries, isLoading: journalsLoading } = useQuery<any[]>({
         queryKey: [api.accounting.journal.list.path],
     });
+
+    const [selectedAccount, setSelectedAccount] = useState<{id: number, name: string, code: string} | null>(null);
+
+    const getLedgerHistory = (accountId: number) => {
+        if (!journalEntries) return [];
+        return journalEntries.flatMap(entry => {
+            const relevantItem = entry.items?.find((i: any) => i.accountId === accountId);
+            if (!relevantItem) return [];
+            return [{
+                ...entry,
+                debit: relevantItem.debit,
+                credit: relevantItem.credit
+            }];
+        }).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    };
 
     const formatCurrency = (valValue: any) => {
         const val = Number(valValue);
@@ -89,8 +107,9 @@ export default function Accounting() {
                         <CardTitle className="text-3xl font-display font-black">{formatCurrency(stats.assets)}</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="flex items-center gap-2 mt-2">
-                            <Badge className="bg-white/20 text-white border-none text-[10px] py-0">Rumah Tangga Finansial</Badge>
+                        <div className="flex items-center justify-between mt-2">
+                            <Badge className="bg-white/20 text-white border-none text-[10px] py-0 cursor-default">Rumah Tangga Finansial</Badge>
+                            <Button variant="ghost" size="sm" className="h-6 text-[10px] bg-white/10 hover:bg-white/20" onClick={() => setSelectedAccount({id: 1101, name: "Kas & Bank", code: "1101"})}>Lihat Kas</Button>
                         </div>
                     </CardContent>
                 </Card>
@@ -189,8 +208,8 @@ export default function Accounting() {
                         </div>
                     </CardHeader>
                     <div className="space-y-2 mt-4">
-                        {accounts?.slice(0, 6).map((acc) => (
-                            <div key={acc.id} className="flex items-center justify-between p-3 rounded-xl hover:bg-muted/30 transition-colors border border-transparent hover:border-border/50">
+                        {accounts?.slice(0, 8).map((acc) => (
+                            <div key={acc.id} onClick={() => setSelectedAccount(acc)} className="flex items-center justify-between p-3 rounded-xl cursor-pointer hover:bg-muted/50 transition-colors border border-transparent hover:border-primary/20">
                                 <div className="flex items-center gap-3">
                                     <div className={cn(
                                         "w-8 h-8 rounded-lg flex items-center justify-center text-[10px] font-bold text-white shadow-sm",
@@ -202,14 +221,64 @@ export default function Accounting() {
                                     )}>
                                         {acc.code}
                                     </div>
-                                    <span className="font-semibold text-sm">{acc.name}</span>
+                                    <span className="font-semibold text-sm group-hover:text-primary transition-colors">{acc.name}</span>
                                 </div>
-                                <span className="font-display font-bold text-sm text-foreground">{formatCurrency(acc.balance)}</span>
+                                <div className="flex items-center gap-3">
+                                    <span className="font-display font-bold text-sm text-foreground">{formatCurrency(acc.balance)}</span>
+                                    <ArrowUpRight className="w-4 h-4 text-muted-foreground opacity-50" />
+                                </div>
                             </div>
                         ))}
                     </div>
                 </Card>
             </div>
+
+            {/* Drill-down Modal */}
+            <Dialog open={!!selectedAccount} onOpenChange={(open) => !open && setSelectedAccount(null)}>
+                <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col rounded-[2rem] bg-slate-50/95 backdrop-blur-3xl border-slate-200">
+                    <DialogHeader className="px-2 pt-2">
+                        <DialogTitle className="text-2xl font-black text-slate-800 flex items-center gap-3">
+                            <div className="w-10 h-10 bg-indigo-100 text-indigo-600 rounded-xl flex items-center justify-center text-sm font-black shadow-inner">
+                                {selectedAccount?.code}
+                            </div>
+                            Buku Besar: {selectedAccount?.name}
+                        </DialogTitle>
+                    </DialogHeader>
+                    
+                    <div className="overflow-y-auto flex-1 rounded-2xl border border-slate-200 bg-white shadow-sm mt-4">
+                        <div className="divide-y divide-slate-100">
+                            {selectedAccount && getLedgerHistory(selectedAccount.id).length === 0 ? (
+                                <div className="p-12 text-center text-slate-400 font-bold">Belum ada mutasi tercatat pada akun ini.</div>
+                            ) : (
+                                selectedAccount && getLedgerHistory(selectedAccount.id).map((entry, idx) => (
+                                    <div key={idx} className="p-4 hover:bg-slate-50 transition-colors flex items-start gap-4">
+                                        <div className="w-10 h-10 rounded-full bg-slate-100 flex flex-col items-center justify-center shrink-0">
+                                            <span className="text-[10px] font-black text-slate-400 leading-none">{format(new Date(entry.date), "dd")}</span>
+                                            <span className="text-[9px] font-bold text-slate-400 uppercase leading-none">{format(new Date(entry.date), "MMM", { locale: idLocale })}</span>
+                                        </div>
+                                        <div className="flex-1 space-y-1">
+                                            <p className="font-bold text-slate-800 leading-tight">{entry.description}</p>
+                                            <p className="text-xs text-slate-400 font-mono">{entry.reference}</p>
+                                        </div>
+                                        <div className="text-right shrink-0">
+                                            {Number(entry.debit) > 0 ? (
+                                                <div className="flex items-center justify-end gap-1 text-teal-600">
+                                                    <Plus className="w-3 h-3" />
+                                                    <span className="font-black">{formatCurrency(entry.debit)}</span>
+                                                </div>
+                                            ) : (
+                                                <div className="flex items-center justify-end gap-1 text-rose-600 font-bold">
+                                                    ({formatCurrency(entry.credit)})
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

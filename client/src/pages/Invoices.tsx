@@ -1,23 +1,29 @@
-import { useInvoices } from "@/hooks/use-invoices";
+import { useInvoices, useCreateSalesReturn } from "@/hooks/use-invoices";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Loader2, Plus, ArrowRight, ClipboardList, CheckCircle2, AlertCircle, Printer } from "lucide-react";
+import { Loader2, Plus, ArrowRight, ClipboardList, CheckCircle2, AlertCircle, Printer, ArrowLeftRight } from "lucide-react";
 import { Link } from "wouter";
 import { format } from "date-fns";
 import { id as idLocale } from "date-fns/locale";
 import { useState } from "react";
 import InvoicePrinter from "@/components/InvoicePrinter";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 
 export default function Invoices() {
     const { invoices, isLoading, updateStatus } = useInvoices();
     const [selectedInvoice, setSelectedInvoice] = useState<any>(null);
+    const [returnInvoice, setReturnInvoice] = useState<any>(null);
+    const [returnReason, setReturnReason] = useState("");
+    
+    const createReturn = useCreateSalesReturn();
 
     const getStatusBadge = (status: string) => {
         switch (status) {
             case "paid": return <Badge className="bg-green-500">Lunas</Badge>;
             case "pending": return <Badge className="bg-amber-500">Menunggu</Badge>;
             case "overdue": return <Badge className="bg-red-500">Jatuh Tempo</Badge>;
+            case "refunded": return <Badge className="bg-purple-500">Telah Diretur</Badge>;
             default: return <Badge variant="secondary">{status}</Badge>;
         }
     };
@@ -26,6 +32,29 @@ export default function Invoices() {
         if (confirm("Apakah Anda yakin ingin menandai invoice ini sebagai lunas?")) {
             await updateStatus.mutateAsync({ id, status: "paid" });
         }
+    };
+
+    const handleReturnSubmit = async () => {
+        if (!returnReason) return alert("Harap isi alasan retur.");
+        
+        const returnItems = returnInvoice.items.map((item: any) => ({
+            productId: item.productId,
+            quantity: item.quantity,
+            reason: returnReason,
+            condition: "defective"
+        }));
+
+        createReturn.mutate({
+            saleId: returnInvoice.id,
+            reason: returnReason,
+            totalRefundAmount: returnInvoice.totalAmount.toString(),
+            items: returnItems
+        }, {
+            onSuccess: () => {
+                setReturnInvoice(null);
+                setReturnReason("");
+            }
+        });
     };
 
     if (isLoading) {
@@ -117,6 +146,17 @@ export default function Invoices() {
                                                 Tandai Lunas
                                             </Button>
                                         )}
+                                        {invoice.paymentStatus === 'paid' && (
+                                            <Button
+                                                size="sm"
+                                                variant="ghost"
+                                                className="text-purple-600 hover:text-purple-700 hover:bg-purple-50 font-bold"
+                                                onClick={() => setReturnInvoice(invoice)}
+                                            >
+                                                <ArrowLeftRight className="w-4 h-4 mr-2" />
+                                                Ajukan Retur
+                                            </Button>
+                                        )}
                                         <Button
                                             size="sm"
                                             variant="outline"
@@ -140,6 +180,44 @@ export default function Invoices() {
                     onClose={() => setSelectedInvoice(null)}
                 />
             )}
+
+            <Dialog open={!!returnInvoice} onOpenChange={(open) => !open && setReturnInvoice(null)}>
+                <DialogContent className="max-w-md rounded-3xl">
+                    <DialogHeader>
+                        <DialogTitle className="text-xl font-bold flex items-center gap-2">
+                            <ArrowLeftRight className="w-5 h-5 text-purple-600" />
+                            Retur Transaksi
+                        </DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4 py-4">
+                        <div>
+                            <p className="text-sm font-bold text-slate-500">Invoice Target</p>
+                            <p className="text-lg font-black text-slate-800">{returnInvoice?.invoiceNumber || `#${returnInvoice?.id}`}</p>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm font-bold text-slate-700">Alasan Retur</label>
+                            <textarea 
+                                value={returnReason}
+                                onChange={(e) => setReturnReason(e.target.value)}
+                                className="w-full h-24 p-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-purple-500 outline-none transition-all"
+                                placeholder="Jelaskan alasan pengembalian dana/barang... (Contoh: Barang cacat pabrik)"
+                            ></textarea>
+                            <p className="text-xs text-slate-500">Proses retur akan menarik seluruh item dan mengembalikan HPP dan Stok secara otomatis.</p>
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setReturnInvoice(null)} className="rounded-xl">Batal</Button>
+                        <Button 
+                            onClick={handleReturnSubmit} 
+                            disabled={createReturn.isPending}
+                            className="bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold"
+                        >
+                            {createReturn.isPending && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                            Proses Retur (Full Refund)
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }

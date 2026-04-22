@@ -16,10 +16,10 @@ declare global {
   }
 }
 
-const TIERS = [
+const MODULES = [
   {
-    id: "free",
-    name: "FREE",
+    id: "inventory",
+    name: "System Core (Inventory)",
     description: "Sistem Inventory Dasar untuk UMKM",
     price: 0,
     features: [
@@ -30,88 +30,64 @@ const TIERS = [
     ],
     icon: User,
     color: "slate",
-    buttonText: "Pakai Versi Gratis",
+    buttonText: "Modul Dasar",
     popular: false
   },
   {
-    id: "pro",
-    name: "PRO",
-    description: "Akses 1 Modul Premium Pilihan",
+    id: "pos",
+    name: "Terminal Kasir/POS",
+    description: "Kasir offline-first multi-cabang",
     price: 150000,
     features: [
-      "Semua fitur Paket FREE",
-      "Pilih 1 Modul: POS / Accounting / Produksi",
-      "Support Email (Respon 24j)",
-      "Termasuk Laporan Bulanan"
+       "Terminal Kasir Tablet & Desktop",
+       "Support Printer Thermal",
+       "Sinkronisasi Data Offline",
+       "Manajemen Multi-Lokasi Kasir"
     ],
-    icon: Star,
+    icon: Store,
     color: "blue",
-    buttonText: "Upgrade ke PRO",
+    buttonText: "Beli Modul Kasir",
     popular: true
   },
   {
-    id: "vip",
-    name: "VIP",
-    description: "Semua Modul Terintegrasi",
-    price: 450000,
-    features: [
-      "Semua Modul Premium Aktif",
-      "Full Inventory & Stock Opname",
-      "Terminal Kasir (POS Premium)",
-      "Double-Entry Accounting System",
-      "Modul Produksi (BOM + Perakitan)",
-      "VIP Support Priority"
-    ],
-    icon: Crown,
-    color: "amber",
-    buttonText: "Beli Paket VIP",
-    popular: false
-  },
-  {
-    id: "vvip",
-    name: "VVIP",
-    description: "Enterprise & Priority Business",
-    price: 950000,
-    features: [
-      "Semua Fitur VIP Unlocked",
-      "Smart Planner AI Engine Unlocked",
-      "Konsultasi Implementasi Bisnis",
-      "Dedicated WhatsApp Support 24/7",
-      "Export Data Raw (Excel/CSV/PDF)",
-      "Custom Branding (Logon Admin)"
-    ],
-    icon: Gem,
-    color: "indigo",
-    buttonText: "Pilih Paket VVIP",
-    popular: false
-  }
-];
-
-const MODULES = [
-  {
-    id: "pos",
-    name: "Terminal Kasir (POS Premium)",
-    price: 150000,
-    icon: Store,
-  },
-  {
     id: "accounting",
-    name: "Accounting Professional",
+    name: "Modul Akuntansi",
+    description: "Jurnal Otomatis & Buku Besar",
     price: 350000,
+    features: [
+       "Double Entry Accounting",
+       "Laporan Laba/Rugi Real-time",
+       "Manajemen Multi Kurs",
+       "Manajemen Aset Tetap"
+    ],
     icon: BookOpen,
+    color: "amber",
+    buttonText: "Beli Modul Akuntansi",
+    popular: false
   },
   {
     id: "production",
-    name: "Modul Produksi & Perakitan",
+    name: "Modul Produksi",
+    description: "Manajemen Resep (BOM) & Pabrik",
     price: 250000,
+    features: [
+       "Bill of Materials",
+       "Tracking Biaya Produksi",
+       "Perhitungan HPP Otomatis",
+       "Integrasi dengan Inventory"
+    ],
     icon: Settings2,
+    color: "indigo",
+    buttonText: "Beli Modul Produksi",
+    popular: false
   }
 ];
 
 const MODULE_NAMES: Record<string, string> = {
-  pos: "Terminal Kasir (POS Premium)",
-  accounting: "Accounting Professional",
-  production: "Modul Produksi & Perakitan",
+  inventory: "System Core (Inventory)",
+  pos: "Terminal Kasir/POS",
+  accounting: "Modul Akuntansi",
+  production: "Modul Produksi",
 };
 
 interface SubscriptionRecord {
@@ -167,24 +143,19 @@ export default function SubscriptionPage() {
     }
   };
 
-  const handleBuyTier = async (tierId: string, amount: number) => {
-    if (tierId === "free") {
+  const handleBuyModule = async (moduleId: string, amount: number) => {
+    if (moduleId === "inventory") {
       setLocation("/");
       return;
     }
 
     try {
-      setLoadingTier(tierId);
-      // For VIP/VVIP, we might want a different payload, but for now 
-      // let's assume 'all' modules. In a real scenario, this would trigger 
-      // a specific tier purchase in the backend. 
-      // Mapping 'pro' to 'pos' as default choice for this demo.
-      const moduleName = tierId === "pro" ? "pos" : "all_modules";
+      setLoadingTier(moduleId);
 
       const res = await fetch("/api/payments/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ moduleName, amount }),
+        body: JSON.stringify({ moduleName: moduleId, amount }),
       });
 
       if (!res.ok) throw new Error("Gagal memproses checkout");
@@ -273,55 +244,57 @@ export default function SubscriptionPage() {
           </p>
         </div>
 
-        {/* Pricing Tiers Grid */}
+        {/* Modules Grid */}
         <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-4">
-          {TIERS.map((tier) => {
-            const Icon = tier.icon;
-            const isFree = tier.id === "free";
-            const isVip = tier.id === "vip" || tier.id === "vvip";
+          {MODULES.map((module) => {
+            const Icon = module.icon;
+            const isFree = module.id === "inventory";
+            const isActive = subscribedModules.includes(module.id);
             
             return (
               <div 
-                key={tier.id}
-                className={`flex flex-col relative rounded-[2rem] p-8 transition-all duration-500 hover:-translate-y-2 group ${
-                  tier.popular 
+                key={module.id}
+                className={`flex flex-col relative rounded-[2.5rem] p-8 transition-all duration-500 hover:-translate-y-2 group ${
+                  module.popular 
                     ? "bg-white border-2 border-[#0044CC] shadow-2xl shadow-blue-500/10 ring-4 ring-blue-50" 
+                    : isActive || isFree
+                    ? "bg-green-50/20 border border-green-100 shadow-xl shadow-black/[0.01]"
                     : "bg-white border border-gray-100 shadow-xl shadow-black/[0.02] hover:border-gray-200"
                 }`}
               >
-                {tier.popular && (
+                {module.popular && (
                   <div className="absolute -top-5 left-1/2 -translate-x-1/2 bg-[#0044CC] text-white px-6 py-2 rounded-full text-xs font-black uppercase tracking-widest shadow-lg">
-                    Paling Populer
+                    Rekomendasi
                   </div>
                 )}
 
                 <div className="space-y-6 flex-1">
                   <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-transform group-hover:scale-110 duration-500 ${
-                    tier.color === "blue" ? "bg-blue-50 text-blue-600" :
-                    tier.color === "amber" ? "bg-amber-50 text-amber-600" :
-                    tier.color === "indigo" ? "bg-indigo-50 text-indigo-600" :
+                    module.color === "blue" ? "bg-blue-50 text-blue-600" :
+                    module.color === "amber" ? "bg-amber-50 text-amber-600" :
+                    module.color === "indigo" ? "bg-indigo-50 text-indigo-600" :
                     "bg-slate-50 text-slate-600"
                   }`}>
                     <Icon className="w-8 h-8" />
                   </div>
 
                   <div>
-                    <h3 className="text-2xl font-black text-gray-900 tracking-tight">{tier.name}</h3>
-                    <p className="text-sm font-medium text-gray-400 mt-1">{tier.description}</p>
+                    <h3 className="text-2xl font-black text-gray-900 tracking-tight">{module.name}</h3>
+                    <p className="text-sm font-medium text-gray-400 mt-1">{module.description}</p>
                   </div>
 
                   <div className="flex items-baseline gap-1">
                     <span className="text-xs font-bold text-gray-400 uppercase tracking-widest mr-1">Rp</span>
                     <span className="text-4xl font-black text-gray-900 tracking-tighter">
-                      {tier.price.toLocaleString("id-ID")}
+                      {module.price.toLocaleString("id-ID")}
                     </span>
                     {!isFree && <span className="text-xs font-bold text-gray-400">/ bulan</span>}
                   </div>
 
                   <div className="space-y-4 pt-6 border-t border-gray-100">
-                    {tier.features.map((feature, idx) => (
+                    {module.features.map((feature, idx) => (
                       <div key={feature} className="flex items-start gap-3 animate-in fade-in" style={{ animationDelay: `${idx*100}ms` }}>
-                        <div className={`mt-1 h-4 w-4 shrink-0 rounded-full flex items-center justify-center ${tier.color === "blue" ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-400"}`}>
+                        <div className={`mt-1 h-4 w-4 shrink-0 rounded-full flex items-center justify-center ${module.color === "blue" ? "bg-blue-100 text-blue-600" : "bg-gray-100 text-gray-400"}`}>
                           <CheckCircle2 className="w-3 h-3" />
                         </div>
                         <span className="text-sm font-medium text-gray-600 leading-tight">{feature}</span>
@@ -332,16 +305,21 @@ export default function SubscriptionPage() {
 
                 <div className="mt-8 pt-6">
                   <Button
-                    onClick={() => handleBuyTier(tier.id, tier.price)}
-                    disabled={loadingTier === tier.id}
-                    className={`w-full h-14 rounded-2xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 flex items-center gap-2 ${
-                      tier.popular 
-                        ? "bg-[#0044CC] text-white hover:bg-blue-600 shadow-xl shadow-blue-500/20" 
+                    onClick={() => handleBuyModule(module.id, module.price)}
+                    disabled={loadingTier === module.id || isActive || isFree}
+                    className={`w-full h-14 rounded-2xl font-black text-sm uppercase tracking-widest transition-all active:scale-95 flex items-center justify-center gap-2 ${
+                      isActive || isFree
+                        ? "bg-transparent text-green-600 border-2 border-green-200 cursor-default opacity-100"
+                        : module.popular
+                        ? "bg-[#0044CC] text-white hover:bg-blue-600 shadow-xl shadow-blue-500/20"
                         : "bg-gray-100 text-gray-600 hover:bg-gray-200"
                     }`}
                   >
-                    {loadingTier === tier.id ? <Loader2 className="animate-spin" /> : tier.buttonText}
-                    <ChevronRight className="w-4 h-4" />
+                    {loadingTier === module.id ? <Loader2 className="animate-spin" /> : 
+                     isActive || isFree ? (
+                       <span className="flex items-center gap-2"><CheckCircle2 className="w-5 h-5"/> Telah Aktif</span>
+                     ) : module.buttonText}
+                    {(!isFree && !isActive) && <ChevronRight className="w-4 h-4" />}
                   </Button>
                 </div>
               </div>

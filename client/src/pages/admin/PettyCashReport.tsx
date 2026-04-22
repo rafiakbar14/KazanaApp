@@ -19,7 +19,7 @@ interface PettyCashEntry {
     id: number;
     createdAt: string;
     sessionId: number;
-    sessionTitle: string;
+    sessionNotes: string;
     description: string;
     type: "in" | "out";
     amount: number;
@@ -27,7 +27,7 @@ interface PettyCashEntry {
 
 interface POSSession {
     id: number;
-    title: string;
+    notes: string;
     startTime: string;
     endTime: string | null;
     status: string;
@@ -35,7 +35,7 @@ interface POSSession {
 
 export default function PettyCashReport() {
     const { user } = useAuth();
-    const [selectedSessionId, setSelectedSessionId] = useState<string>("");
+    const [selectedSessionId, setSelectedSessionId] = useState<string>("all");
     const [fromDate, setFromDate] = useState<Date | undefined>(() => {
         const date = new Date();
         date.setDate(1);
@@ -53,6 +53,16 @@ export default function PettyCashReport() {
     // Fetch petty cash data
     const { data: pettyCashData = [], isLoading } = useQuery<PettyCashEntry[]>({
         queryKey: ["/api/admin/petty-cash-report", selectedSessionId, fromDate?.toISOString(), toDate?.toISOString()],
+        queryFn: async () => {
+            const params = new URLSearchParams();
+            if (selectedSessionId && selectedSessionId !== "all") params.append("sessionId", selectedSessionId);
+            if (fromDate) params.append("from", fromDate.toISOString());
+            if (toDate) params.append("to", toDate.toISOString());
+
+            const res = await fetch(`/api/admin/petty-cash-report?${params.toString()}`);
+            if (!res.ok) throw new Error("Gagal mengambil laporan kas kecil");
+            return res.json();
+        },
         enabled: !!user,
     });
 
@@ -70,7 +80,7 @@ export default function PettyCashReport() {
     // Filter data based on search term
     const filteredData = pettyCashData.filter(entry =>
         entry.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        entry.sessionTitle.toLowerCase().includes(searchTerm.toLowerCase())
+        entry.sessionNotes.toLowerCase().includes(searchTerm.toLowerCase())
     );
 
     const handleExportCSV = () => {
@@ -81,7 +91,7 @@ export default function PettyCashReport() {
             headers.join(","),
             ...filteredData.map(entry => [
                 format(new Date(entry.createdAt), "dd/MM/yyyy HH:mm"),
-                `"${entry.sessionTitle}"`,
+                `"${entry.sessionNotes}"`,
                 `"${entry.description}"`,
                 entry.type === "in" ? "Masuk" : "Keluar",
                 entry.amount.toFixed(2)
@@ -134,10 +144,10 @@ export default function PettyCashReport() {
                                     <SelectValue placeholder="Semua Sesi" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="">Semua Sesi</SelectItem>
+                                    <SelectItem value="all">Semua Sesi</SelectItem>
                                     {sessions.map(session => (
                                         <SelectItem key={session.id} value={session.id.toString()}>
-                                            {session.title} ({format(new Date(session.startTime), "dd/MM/yyyy")})
+                                            {session.notes || `Sesi #${session.id}`} ({format(new Date(session.startTime), "dd/MM/yyyy")})
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
@@ -262,8 +272,8 @@ export default function PettyCashReport() {
                 <CardHeader>
                     <CardTitle>Detail Transaksi Kas Kecil</CardTitle>
                     <CardDescription>
-                        {selectedSessionId
-                            ? `Sesi: ${sessions.find(s => s.id.toString() === selectedSessionId)?.title}`
+                        {selectedSessionId !== "all"
+                            ? `Sesi: ${sessions.find(s => s.id.toString() === selectedSessionId)?.notes || selectedSessionId}`
                             : "Semua Sesi"}
                         {fromDate && toDate && ` • Periode: ${format(fromDate, "dd/MM/yyyy")} - ${format(toDate, "dd/MM/yyyy")}`}
                     </CardDescription>
@@ -297,7 +307,7 @@ export default function PettyCashReport() {
                                             </TableCell>
                                             <TableCell>
                                                 <div className="flex flex-col">
-                                                    <span className="font-medium">{entry.sessionTitle}</span>
+                                                    <span className="font-medium">{entry.sessionNotes}</span>
                                                     <span className="text-xs text-muted-foreground">
                                                         ID: {entry.sessionId}
                                                     </span>
@@ -325,7 +335,7 @@ export default function PettyCashReport() {
             </Card>
 
             {/* Summary by Session */}
-            {!selectedSessionId && filteredData.length > 0 && (
+            {selectedSessionId === "all" && filteredData.length > 0 && (
                 <Card>
                     <CardHeader>
                         <CardTitle>Ringkasan per Sesi</CardTitle>
@@ -355,7 +365,7 @@ export default function PettyCashReport() {
                                         return (
                                             <TableRow key={sessionId}>
                                                 <TableCell className="font-medium">
-                                                    {session?.title || `Sesi ${sessionId}`}
+                                                    {session?.notes || `Sesi ${sessionId}`}
                                                 </TableCell>
                                                 <TableCell className="text-right text-green-600">
                                                     Rp {sessionIn.toLocaleString("id-ID")}

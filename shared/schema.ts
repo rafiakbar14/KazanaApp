@@ -232,6 +232,7 @@ export const inboundItems = pgTable("inbound_items", {
   sessionId: integer("session_id").references(() => inboundSessions.id).notNull(),
   productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
   quantityReceived: integer("quantity_received").notNull(),
+  unitCost: decimal("unit_cost").default("0").notNull(),
   expiryDate: timestamp("expiry_date"),
   notes: text("notes"),
 });
@@ -442,6 +443,13 @@ export const posPettyCash = pgTable("pos_petty_cash", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const insertPosPettyCashSchema = createInsertSchema(posPettyCash).omit({
+  id: true,
+  createdAt: true,
+});
+export type PosPettyCash = typeof posPettyCash.$inferSelect;
+export type InsertPosPettyCash = z.infer<typeof insertPosPettyCashSchema>;
+
 export const posPendingSales = pgTable("pos_pending_sales", {
   id: serial("id").primaryKey(),
   sessionId: integer("session_id").references(() => posSessions.id).notNull(),
@@ -480,12 +488,33 @@ export const settings = pgTable("settings", {
   storeName: text("store_name").default("Kazana Shop").notNull(),
   storeAddress: text("store_address"),
   storePhone: text("store_phone"),
+  storeEmail: text("store_email"),
+  picName: text("pic_name"),
   storeLogo: text("store_logo"),
+  storeProvince: text("store_province"),
+  storeCity: text("store_city"),
+  storeDistrict: text("store_district"),
+  storePostalCode: text("store_postal_code"),
+  storeNpwp: text("store_npwp"),
+  storeWebsite: text("store_website"),
+  storeType: text("store_type"),
   userId: text("user_id").notNull(),
+  
+  // New Professional Fields
+  currency: text("currency").default("IDR").notNull(),
+  timezone: text("timezone").default("Asia/Jakarta").notNull(),
+  bankName: text("bank_name"),
+  bankAccountNo: text("bank_account_no"),
+  bankAccountName: text("bank_account_name"),
+  taxStatus: text("tax_status").default("Non-PKP"), // PKP, Non-PKP
+  businessDescription: text("business_description"),
+  
   fastMovingThreshold: integer("fast_moving_threshold").default(30).notNull(),
   slowMovingThreshold: integer("slow_moving_threshold").default(60).notNull(),
+  hideBranding: integer("hide_branding").default(0).notNull(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
 
 // === Accounting (Double-Entry & Assets) ===
 
@@ -884,7 +913,6 @@ export const insertPosDeviceSchema = createInsertSchema(posDevices).omit({ id: t
 export const insertPosRegistrationCodeSchema = createInsertSchema(posRegistrationCodes).omit({ id: true, createdAt: true });
 export const insertPromotionSchema = createInsertSchema(promotions).omit({ id: true, createdAt: true });
 export const insertPosSessionSchema = createInsertSchema(posSessions).omit({ id: true });
-export const insertPosPettyCashSchema = createInsertSchema(posPettyCash).omit({ id: true, createdAt: true });
 export const insertPosPendingSaleSchema = createInsertSchema(posPendingSales).omit({ id: true, createdAt: true });
 export const insertTieredPricingSchema = createInsertSchema(tieredPricing).omit({ id: true });
 export const insertProductBundleSchema = createInsertSchema(productBundles).omit({ id: true });
@@ -897,6 +925,9 @@ export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: tru
 export const insertCustomerLoyaltyLedgerSchema = createInsertSchema(customerLoyaltyLedger).omit({ id: true, createdAt: true });
 export const insertStockTransferSchema = createInsertSchema(stockTransfers).omit({ id: true, createdAt: true });
 export const insertStockTransferItemSchema = createInsertSchema(stockTransferItems).omit({ id: true });
+export const insertSalesReturnSchema = createInsertSchema(salesReturns).omit({ id: true, createdAt: true });
+export const insertSalesReturnItemSchema = createInsertSchema(salesReturnItems).omit({ id: true });
+
 
 
 
@@ -963,8 +994,6 @@ export type Promotion = typeof promotions.$inferSelect;
 export type InsertPromotion = z.infer<typeof insertPromotionSchema>;
 export type PosSession = typeof posSessions.$inferSelect;
 export type InsertPosSession = z.infer<typeof insertPosSessionSchema>;
-export type PosPettyCash = typeof posPettyCash.$inferSelect;
-export type InsertPosPettyCash = z.infer<typeof insertPosPettyCashSchema>;
 export type PosPendingSale = typeof posPendingSales.$inferSelect;
 export type InsertPosPendingSale = z.infer<typeof insertPosPendingSaleSchema>;
 export type TieredPricing = typeof tieredPricing.$inferSelect;
@@ -987,12 +1016,16 @@ export type CustomerLoyaltyLedger = typeof customerLoyaltyLedger.$inferSelect;
 export type InsertCustomerLoyaltyLedger = z.infer<typeof insertCustomerLoyaltyLedgerSchema>;
 
 export type InsertPosRegistrationCode = typeof posRegistrationCodes.$inferInsert;
+export type StockTransferItem = typeof stockTransferItems.$inferSelect;
 export type InboundItemPhoto = typeof inboundItemPhotos.$inferSelect;
 export type OutboundItemPhoto = typeof outboundItemPhotos.$inferSelect;
 export type StockTransfer = typeof stockTransfers.$inferSelect;
 export type InsertStockTransfer = z.infer<typeof insertStockTransferSchema>;
-export type StockTransferItem = typeof stockTransferItems.$inferSelect;
 export type InsertStockTransferItem = z.infer<typeof insertStockTransferItemSchema>;
+export type SalesReturn = typeof salesReturns.$inferSelect;
+export type InsertSalesReturn = z.infer<typeof insertSalesReturnSchema>;
+export type SalesReturnItem = typeof salesReturnItems.$inferSelect;
+export type InsertSalesReturnItem = z.infer<typeof insertSalesReturnItemSchema>;
 export type Supplier = typeof suppliers.$inferSelect;
 export type InsertSupplier = z.infer<typeof insertSupplierSchema>;
 export type ProductWithPhotosAndUnits = Product & { photos: ProductPhoto[]; units: ProductUnit[] };
@@ -1000,10 +1033,10 @@ export type OpnameRecordWithProduct = OpnameRecord & { product: Product & { phot
 export type OpnameSessionWithRecords = OpnameSession & { records: OpnameRecordWithProduct[] };
 export type InboundSessionWithItems = InboundSession & { items: (InboundItem & { product: Product; photos: any[] })[] };
 export type OutboundSessionWithItems = OutboundSession & { items: (OutboundItem & { product: Product; photos: any[] })[]; toBranch: Branch | null };
-export type StockTransferWithItems = StockTransfer & { 
-  items: (StockTransferItem & { product: Product })[]; 
-  fromBranch: Branch | null; 
-  toBranch: Branch | null 
+export type StockTransferWithItems = StockTransfer & {
+  items: (StockTransferItem & { product: Product })[];
+  fromBranch: Branch | null;
+  toBranch: Branch | null
 };
 export type BomWithItems = Bom & { items: (BomItem & { product: Product })[]; targetProduct: Product };
 export type SaleWithItems = Sale & {

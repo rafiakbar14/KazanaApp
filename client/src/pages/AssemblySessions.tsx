@@ -90,10 +90,12 @@ export default function AssemblySessions() {
                                             </Badge>
                                         </td>
                                         <td className="p-4 text-right">
-                                            <Button variant="ghost" size="sm" className="h-8 rounded-lg group-hover:bg-primary group-hover:text-white transition-all shadow-sm">
-                                                Detail
-                                                <ArrowRight className="w-4 h-4 ml-1.5" />
-                                            </Button>
+                                            <Link href={`/production/assembly/${session.id}`}>
+                                                <Button variant="ghost" size="sm" className="h-8 rounded-lg group-hover:bg-primary group-hover:text-white transition-all shadow-sm">
+                                                    Detail
+                                                    <ArrowRight className="w-4 h-4 ml-1.5" />
+                                                </Button>
+                                            </Link>
                                         </td>
                                     </tr>
                                 ))}

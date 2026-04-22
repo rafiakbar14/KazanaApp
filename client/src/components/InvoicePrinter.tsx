@@ -29,9 +29,9 @@ export default function InvoicePrinter({ invoice, onClose }: InvoicePrinterProps
     };
 
     return (
-        <div className="fixed inset-0 z-[200] bg-slate-900/90 backdrop-blur-md flex flex-col no-print">
+        <div className="fixed inset-0 z-[200] bg-slate-900/90 backdrop-blur-md flex flex-col">
             {/* Toolbar */}
-            <div className="h-20 bg-slate-900 border-b border-white/10 flex items-center justify-between px-8 shrink-0">
+            <div className="h-20 bg-slate-900 border-b border-white/10 flex items-center justify-between px-8 shrink-0 no-print">
                 <div className="flex items-center gap-4">
                     <div className="bg-primary/20 p-2 rounded-xl">
                         <Printer className="w-6 h-6 text-primary" />
@@ -54,29 +54,37 @@ export default function InvoicePrinter({ invoice, onClose }: InvoicePrinterProps
             </div>
 
             {/* Scrollable Area */}
-            <div className="flex-1 overflow-y-auto p-12 bg-slate-800 flex justify-center">
+            <div className="flex-1 overflow-y-auto p-12 bg-slate-800 flex justify-center invoice-print-area-wrapper">
                 {/* Printable Page */}
                 <div className="bg-white text-black w-[210mm] min-h-[297mm] p-[20mm] shadow-2xl invoice-print-area font-sans">
                     <style>{`
                         @media print {
-                            body * { visibility: hidden; }
-                            .invoice-print-area, .invoice-print-area * { visibility: visible; }
-                            .invoice-print-area {
-                                position: absolute;
-                                left: 0;
-                                top: 0;
-                                width: 210mm;
-                                height: 297mm;
-                                padding: 20mm;
-                                margin: 0;
-                                border: none;
-                                box-shadow: none;
-                            }
                             @page {
                                 size: A4;
                                 margin: 0;
                             }
-                            .no-print { display: none !important; }
+                            #root, .no-print {
+                                display: none !important;
+                            }
+                            html, body {
+                                background: white !important;
+                                margin: 0 !important;
+                                padding: 0 !important;
+                            }
+                            .invoice-print-area-wrapper {
+                                display: block !important;
+                                width: 210mm !important;
+                                margin: 0 auto !important;
+                            }
+                            .invoice-print-area {
+                                display: block !important;
+                                width: 210mm !important;
+                                min-height: 297mm !important;
+                                padding: 20mm !important;
+                                margin: 0 !important;
+                                border: none !important;
+                                box-shadow: none !important;
+                            }
                         }
                     `}</style>
 

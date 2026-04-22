@@ -12,7 +12,8 @@ import {
   posDevices, posRegistrationCodes, promotions,
   posSessions, posPettyCash, posPendingSales, vouchers, settings,
   tieredPricing, productBundles,
-  categories, units, activityLogs, auditLogs, inventoryLots, customerLoyaltyLedger,
+  categories, units, activityLogs, auditLogs, inventoryLots, customerLoyaltyLedger, otpCodes,
+
   type Product, type InsertProduct,
   type OpnameSession, type InsertOpnameSession,
   type OpnameRecord,
@@ -64,7 +65,7 @@ import {
   type StockTransferItem, type InsertStockTransferItem,
   type CustomerLoyaltyLedger, type InsertCustomerLoyaltyLedger,
 } from "@shared/schema";
-import { eq, desc, and, inArray, gt, lt } from "drizzle-orm";
+import { eq, desc, and, inArray, gt, lt, ne } from "drizzle-orm";
 
 export interface IStorage {
   getProducts(userId: string, locationType?: string, branchId?: number): Promise<Product[]>;
@@ -845,17 +846,31 @@ export class DatabaseStorage implements IStorage {
       for (const item of items) {
         const product = await this.getProduct(item.productId);
         if (product) {
+          const currentQty = product.currentStock || 0;
+          const currentUnitCost = Number(product.unitCost || 0);
+          const inboundQty = item.quantityReceived;
+          const inboundUnitCost = (item as any).unitCost ? Number((item as any).unitCost) : 0;
+
+          // WAC Formula: ((OldQty * OldCost) + (NewQty * NewCost)) / (OldQty + NewQty)
+          const newTotalStock = currentQty + inboundQty;
+          const newUnitCost = newTotalStock > 0 
+              ? ((currentQty * currentUnitCost) + (inboundQty * inboundUnitCost)) / newTotalStock
+              : inboundUnitCost;
+
           await tx.update(products)
-            .set({ currentStock: product.currentStock + item.quantityReceived })
+            .set({ 
+              currentStock: newTotalStock,
+              unitCost: newUnitCost.toString()
+            })
             .where(eq(products.id, item.productId));
 
           // FIFO: Catat lot baru untuk barang masuk dengan referensi cabang
           await tx.insert(inventoryLots).values({
             productId: item.productId,
             branchId: session.branchId,
-            purchasePrice: (item as any).unitCost?.toString() || "0",
-            initialQuantity: item.quantityReceived,
-            remainingQuantity: item.quantityReceived,
+            purchasePrice: inboundUnitCost.toString(),
+            initialQuantity: inboundQty,
+            remainingQuantity: inboundQty,
             inboundDate: new Date(),
             inboundSessionId: session.id,
             expiryDate: item.expiryDate
@@ -863,6 +878,9 @@ export class DatabaseStorage implements IStorage {
         }
       }
     });
+
+    // 5. Automated Journal Entry (Inventory / Payable)
+    await this.createAccountingEntriesForInbound(id);
 
     return session;
   }
@@ -1095,6 +1113,11 @@ export class DatabaseStorage implements IStorage {
         bom: {
           with: {
             targetProduct: true,
+            items: {
+              with: {
+                product: true
+              }
+            }
           }
         }
       }
@@ -1234,20 +1257,21 @@ export class DatabaseStorage implements IStorage {
     })) as unknown as SaleWithItems[];
   }
 
-  async getSale(id: number): Promise<SaleWithItems | undefined> {
-    const [sale] = await db.select().from(sales).where(eq(sales.id, id));
+  async getSale(id: number, txContext?: any): Promise<SaleWithItems | undefined> {
+    const executor = txContext || db;
+    const [sale] = await executor.select().from(sales).where(eq(sales.id, id));
     if (!sale) return undefined;
 
-    const items = await db.select().from(saleItems)
+    const items = await executor.select().from(saleItems)
       .where(eq(saleItems.saleId, id))
       .leftJoin(products, eq(saleItems.productId, products.id));
 
     const [customer] = sale.customerId
-      ? await db.select().from(customers).where(eq(customers.id, sale.customerId))
+      ? await executor.select().from(customers).where(eq(customers.id, sale.customerId))
       : [null];
 
     const [salesperson] = sale.salespersonId
-      ? await db.select().from(users).where(eq(users.id, sale.salespersonId))
+      ? await executor.select().from(users).where(eq(users.id, sale.salespersonId))
       : [null];
 
     return {
@@ -1259,7 +1283,9 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createSale(sale: InsertSale, items: InsertSaleItem[]): Promise<SaleWithItems> {
-    return await db.transaction(async (tx) => {
+    console.log(">>> [storage.createSale] FUNCTION ENTERED");
+    try {
+      return await db.transaction(async (tx) => {
       let saleData = { ...sale };
       const pointsToRedeem = sale.pointsRedeemed || 0;
       const pointsValue = pointsToRedeem; // 1 Poin = Rp 1 (confirmed by user)
@@ -1297,6 +1323,10 @@ export class DatabaseStorage implements IStorage {
       // Fetch related data for validation
       const allTieredPrices = await tx.select().from(tieredPricing).where(inArray(tieredPricing.productId, productIds));
       const allPromos = await tx.select().from(promotions).where(and(inArray(promotions.productId, productIds), eq(promotions.active, 1)));
+
+      let calculatedSubtotal = 0;
+      let totalSaleCogs = 0;
+      const validatedItems = [];
 
       for (const item of items) {
         if (item.quantity <= 0) {
@@ -1421,20 +1451,30 @@ export class DatabaseStorage implements IStorage {
       }
 
       saleData.totalAmount = finalGrandTotal;
-      saleData.discountAmount = finalDiscount.toString(); // Force server-calculated discount
-      
+      saleData.discountAmount = finalDiscount; 
+
+      console.log(">>> [createSale] STEP 6: PRE-INSERT AUDIT", {
+        totalAmount: saleData.totalAmount,
+        discountAmount: saleData.discountAmount,
+        pointsValueRedeemed: saleData.pointsValueRedeemed
+      });
+
       const [newSale] = await tx.insert(sales).values(saleData).returning();
+      console.log(">>> [createSale] STEP 7: INSERT SALE SUCCESS ID:", newSale.id);
 
       for (const vItem of validatedItems) {
-         await tx.insert(saleItems).values({
-            ...vItem,
-            saleId: newSale.id,
-            discountAmount: vItem.discountAmount || 0,
-            appliedPromotionId: vItem.appliedPromotionId || null
-         });
+        console.log(">>> [createSale] STEP 8: INSERTING ITEM FOR PRODUCT:", vItem.productId);
+        await tx.insert(saleItems).values({
+          ...vItem,
+          saleId: newSale.id,
+          unitPrice: Number(vItem.unitPrice),
+          subtotal: Number(vItem.subtotal),
+          discountAmount: Number(vItem.discountAmount || 0),
+          appliedPromotionId: vItem.appliedPromotionId || null
+        });
 
-         // Log stock movement for ledger
-         await this.createActivityLog({
+          // Log stock movement for ledger
+          await this.createActivityLog({
             userId: sale.userId,
             branchId: newSale.branchId || undefined,
             entityType: "product",
@@ -1446,11 +1486,11 @@ export class DatabaseStorage implements IStorage {
               quantity: vItem.quantity,
               unitPrice: vItem.unitPrice
             }
-         }, tx);
-      }
+          }, tx);
+        }
 
-      // Record Sales and Cogs into Journal via atomic txContext
-      await this.autoJournalSale(
+        // Record Sales and Cogs into Journal via atomic txContext
+        await this.autoJournalSale(
           newSale.id, 
           sale.userId, 
           finalGrandTotal, 
@@ -1459,7 +1499,7 @@ export class DatabaseStorage implements IStorage {
           finalTax,
           newSale.branchId || undefined,
           tx
-      );
+        );
 
       // Add Activity Log for the sale
       await this.createActivityLog({
@@ -1525,8 +1565,15 @@ export class DatabaseStorage implements IStorage {
           }
       }
 
-      return (await this.getSale(newSale.id))!;
+      const finalSale = await this.getSale(newSale.id, tx);
+      console.log(">>> [storage.createSale] SUCCESS, RETURNING SALE ID:", finalSale?.id);
+      return finalSale!;
     });
+    } catch (err: any) {
+      console.error(">>> [storage.createSale] FATAL ERROR:", err.message);
+      console.error(">>> [storage.createSale] STACK:", err.stack);
+      throw err;
+    }
   }
 
   async voidSale(id: number, userId: string, reason?: string): Promise<Sale> {
@@ -1586,6 +1633,62 @@ export class DatabaseStorage implements IStorage {
           }
         }, tx);
       }
+
+      // 3. Reverse CRM Loyalty Points
+      if (sale.customerId) {
+        const earnedPoints = Math.floor(Number(sale.totalAmount) / 1000);
+        const pointsToRedeem = sale.pointsRedeemed || 0;
+        
+        const [customer] = await tx.select().from(customers).where(eq(customers.id, sale.customerId));
+        
+        if (customer) {
+          // If they earned points, we must deduct them back.
+          // If they spent points, we must refund them back.
+          let netPointsDelta = pointsToRedeem - earnedPoints; 
+          const newPointsBalance = Math.max(0, (customer.points || 0) + netPointsDelta);
+
+          await tx.update(customers)
+            .set({ points: newPointsBalance })
+            .where(eq(customers.id, customer.id));
+
+          if (earnedPoints > 0) {
+            await tx.insert(customerLoyaltyLedger).values({
+              customerId: customer.id,
+              pointsDelta: -earnedPoints,
+              action: "spent",
+              saleId: sale.id,
+              note: `Penarikan poin akibat Void Transaksi #${sale.invoiceNumber || sale.id}`,
+              userId: userId
+            } as any);
+          }
+
+          if (pointsToRedeem > 0) {
+            await tx.insert(customerLoyaltyLedger).values({
+              customerId: customer.id,
+              pointsDelta: pointsToRedeem,
+              action: "earned",
+              saleId: sale.id,
+              note: `Pengembalian poin akibat Void Transaksi #${sale.invoiceNumber || sale.id}`,
+              userId: userId
+            } as any);
+          }
+
+          await tx.insert(auditLogs).values({
+            action: "LOYALTY_POINTS_REVERSED",
+            entityType: "customer",
+            entityId: customer.id,
+            userId: userId,
+            details: { 
+              saleId: sale.id, 
+              pointsRefunded: pointsToRedeem, 
+              pointsDeducted: earnedPoints,
+              newBalance: newPointsBalance 
+            }
+          });
+        }
+      }
+
+
 
       // 3. Reverse accounting entries (Journal Entry Reversal) passing EXACT totalSaleCogs and tx
       await this.autoJournalVoid(
@@ -1734,6 +1837,7 @@ export class DatabaseStorage implements IStorage {
         sessionId: session.id,
         productId: item.productId,
         quantityReceived: item.quantityOrdered,
+        unitCost: item.unitPrice.toString(),
       });
     }
     return session;
@@ -1803,34 +1907,10 @@ export class DatabaseStorage implements IStorage {
         if (item.restockStatus === "restocked") {
           const [product] = await tx.select().from(products).where(eq(products.id, item.productId));
           if (product) {
-            await tx.update(products)
-              .set({ currentStock: sql`${products.currentStock} + ${item.quantityReturned}` })
-              .where(eq(products.id, item.productId));
-
-            await tx.insert(inventoryLots).values({
-              productId: item.productId,
-              purchasePrice: product.unitCost || "0",
-              initialQuantity: Number(item.quantityReturned),
-              remainingQuantity: Number(item.quantityReturned),
-              inboundDate: new Date(),
-              notes: `Retur dari Penjualan #${data.saleId} (RMA: ${newReturn.returnNumber})`
-            });
-
-            // Log stock movement for ledger
-            await this.createActivityLog({
-              userId,
-              entityType: "product",
-              entityId: item.productId,
-              action: "STOCK_IN",
-              details: { 
-                type: "rma_return", 
-                reference: newReturn.returnNumber, 
-                quantity: item.quantityReturned 
-              }
-            }, tx);
-          }
-        }
-      }
+              // Biarkan completeSalesReturn menangani restock ke produk dan inventoryLots
+         }
+       }
+     }
 
       // 4. Create activity log
       await this.createActivityLog({
@@ -2024,6 +2104,14 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createJournalEntry(entry: InsertJournalEntry, items: Omit<InsertJournalItem, "entryId" | "id">[]): Promise<JournalEntry> {
+    const totalDebit = items.reduce((sum, i) => sum + Number(i.debit || 0), 0);
+    const totalCredit = items.reduce((sum, i) => sum + Number(i.credit || 0), 0);
+
+    // Tolerance for floating point precision if any
+    if (Math.abs(totalDebit - totalCredit) > 0.01) {
+      throw new Error(`Jurnal tidak seimbang: Total Debit (${totalDebit}) != Total Credit (${totalCredit}). Selisih: ${Math.abs(totalDebit - totalCredit)}`);
+    }
+
     const [newEntry] = await db.insert(journalEntries).values(entry).returning();
     for (const item of items) {
       await db.insert(journalItems).values({ ...item, entryId: newEntry.id } as InsertJournalItem);
@@ -2116,6 +2204,79 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  async createAccountingEntriesForInbound(sessionId: number) {
+    const { eq } = await import("drizzle-orm");
+    const [session] = await db.select().from(inboundSessions).where(eq(inboundSessions.id, sessionId));
+    if (!session) return;
+
+    const items = await db.select().from(inboundItems).where(eq(inboundItems.sessionId, sessionId));
+    
+    let totalInboundCost = 0;
+    for (const item of items) {
+      totalInboundCost += (Number(item.quantityReceived || 0) * Number(item.unitCost || 0));
+    }
+
+    if (totalInboundCost <= 0) return;
+
+    await this.ensureDefaultAccounts(session.userId);
+    const userAccounts = await this.getAccounts(session.userId);
+    const findAccount = (code: string) => userAccounts.find(a => a.code === code);
+
+    const invAcc = findAccount("1201"); // Persediaan
+    const payableAcc = findAccount("2101"); // Hutang Usaha
+
+    if (!invAcc || !payableAcc) return;
+
+    await this.createJournalEntry(
+      { 
+        description: `Penerimaan Barang (Inbound) #${session.id} - ${session.title}`, 
+        reference: `INB-${session.id}`, 
+        userId: session.userId, 
+        date: new Date() 
+      },
+      [
+        { accountId: invAcc.id, debit: totalInboundCost, credit: 0, userId: session.userId, branchId: session.branchId },
+        { accountId: payableAcc.id, debit: 0, credit: totalInboundCost, userId: session.userId, branchId: session.branchId },
+      ]
+    );
+  }
+
+  async autoJournalPettyCash(sessionId: number, type: "in" | "out", amount: number, description: string, userId: string) {
+    await this.ensureDefaultAccounts(userId);
+    const userAccounts = await this.getAccounts(userId);
+    const findAccount = (code: string) => userAccounts.find(a => a.code === code);
+
+    const cashAcc = findAccount("1101");
+    const expenseAcc = findAccount("5201");
+    const incomeAcc = findAccount("4201");
+
+    if (!cashAcc || !expenseAcc || !incomeAcc) return;
+
+    const [session] = await db.select().from(posSessions).where(eq(posSessions.id, sessionId));
+    const branchId = session?.branchId || undefined;
+
+    const jItems = [];
+    if (type === "out") {
+      // Debit Expense, Credit Cash
+      jItems.push({ accountId: expenseAcc.id, debit: amount, credit: 0, userId, branchId });
+      jItems.push({ accountId: cashAcc.id, debit: 0, credit: amount, userId, branchId });
+    } else {
+      // Debit Cash, Credit Income
+      jItems.push({ accountId: cashAcc.id, debit: amount, credit: 0, userId, branchId });
+      jItems.push({ accountId: incomeAcc.id, debit: 0, credit: amount, userId, branchId });
+    }
+
+    await this.createJournalEntry(
+      { 
+        description: `Kas Kecil POS: ${description}`, 
+        reference: `PC-${sessionId}`, 
+        userId, 
+        date: new Date() 
+      },
+      jItems
+    );
+  }
+
   async autoJournalStockAdjustment(sessionId: number, userId: string, adjustments: { type: "shrinkage" | "surplus", amount: number, productName: string, branchId?: number }[]) {
     await this.ensureDefaultAccounts(userId);
     const userAccounts = await this.getAccounts(userId);
@@ -2153,7 +2314,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async deductFifoStockAndGetCogs(productId: number, quantity: number, branchId?: number, txContext?: any): Promise<number> {
-    const { eq, and, gt, asc, isNull, or } = await import("drizzle-orm");
+    const { eq, and, gt, asc, desc, isNull, or } = await import("drizzle-orm");
     const executor = txContext || db;
     
     // Filter by branch if provided, otherwise fallback to general lots (for backward compatibility)
@@ -2194,15 +2355,16 @@ export class DatabaseStorage implements IStorage {
         if (fallbackCost === 0) {
           const [lastLot] = await executor.select().from(inventoryLots)
             .where(eq(inventoryLots.productId, productId))
-            .orderBy(asc(inventoryLots.inboundDate)); // Should be desc, wait, let's fix that
-          if (lastLot && Number(lastLot.purchasePrice) > 0) {
-             fallbackCost = Number(lastLot.purchasePrice);
-          } else {
-             // If still 0, fallback to selling price minus arbitrary 30% margin to prevent wild 100% tax inflating
-             fallbackCost = Number(product.sellingPrice || 0) * 0.7;
+            .orderBy(desc(inventoryLots.inboundDate));
+            if (lastLot && Number(lastLot.purchasePrice) > 0) {
+              fallbackCost = Number(lastLot.purchasePrice);
+            } else {
+              // If still 0, fallback to selling price minus arbitrary 30% margin to prevent wild 100% tax inflating
+              fallbackCost = Number(product.sellingPrice || 0) * 0.7;
+              console.warn(`>>> [AUDIT] FIFO Fallback triggered for product ${productId}. No lots or unitCost found. Using 70% of selling price: ${fallbackCost}`);
+            }
           }
-        }
-        totalCogs += qtyToDeduct * fallbackCost;
+          totalCogs += qtyToDeduct * fallbackCost;
       }
     }
 
@@ -2224,10 +2386,13 @@ export class DatabaseStorage implements IStorage {
     if (!cashAcc || !salesAcc || !hppAcc || !invAcc || !receivableAcc) return;
 
     const executor = txContext || db;
-    const { journalEntries, journalItems } = await import("@shared/schema");
+    const { journalEntries, journalItems, sales } = await import("@shared/schema");
+    const { eq } = await import("drizzle-orm");
+
+    const [saleInfo] = await executor.select().from(sales).where(eq(sales.id, saleId));
 
     // 1. Reverse Sale Journal
-    const creditAccount = type === "pos" ? cashAcc.id : receivableAcc.id;
+    const creditAccount = (type === "pos" || (saleInfo?.paymentStatus === "paid")) ? cashAcc.id : receivableAcc.id;
     const descPrefix = type === "pos" ? "Void Penjualan POS" : "Void Penjualan Invoice";
 
     const pureRevenue = totalAmount - taxAmount;
@@ -2312,14 +2477,35 @@ export class DatabaseStorage implements IStorage {
 
   // === POS ECOSYSTEM ===
   async getPOSSessions(userId: string, branchId?: number): Promise<any[]> {
-    const { eq, and } = await import("drizzle-orm");
+    const { eq, and, or, desc } = await import("drizzle-orm");
+    
+    // Base query with user join to get cashier name and verify team
+    const query = db.select({
+      session: posSessions,
+      user: {
+        id: users.id,
+        username: users.username,
+        firstName: users.firstName,
+        lastName: users.lastName
+      }
+    })
+    .from(posSessions)
+    .leftJoin(users, eq(posSessions.userId, users.id))
+    .orderBy(desc(posSessions.startTime));
+
+    // Filter by team: sessions where the user's adminId is the requested userId, or the user is the admin themselves
+    const teamConditions = or(
+      eq(users.adminId, userId),
+      eq(users.id, userId)
+    );
+    
     const whereClause = branchId
-      ? and(eq(posSessions.userId, userId), eq(posSessions.branchId, branchId))
-      : eq(posSessions.userId, userId);
+      ? and(teamConditions, eq(posSessions.branchId, branchId))
+      : teamConditions;
 
-    const sessions = await db.select().from(posSessions).where(whereClause).orderBy(desc(posSessions.startTime));
+    const sessions = await query.where(whereClause);
 
-    const enrichedSessions = await Promise.all(sessions.map(async (session) => {
+    const enrichedSessions = await Promise.all(sessions.map(async ({ session, user }) => {
       const sessionSales = await db.select().from(sales).where(and(eq(sales.sessionId, session.id), eq(sales.paymentStatus, "paid")));
       const totalSales = sessionSales.reduce((sum, s) => sum + Number(s.totalAmount), 0);
       const totalCashSales = sessionSales.filter(s => s.paymentMethod === 'cash').reduce((sum, s) => sum + Number(s.totalAmount), 0);
@@ -2331,6 +2517,7 @@ export class DatabaseStorage implements IStorage {
 
       return {
         ...session,
+        user,
         totalSales,
         totalCashSales,
         pettyCashTotal
@@ -2341,15 +2528,41 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getActivePOSSession(userId: string, branchId?: number): Promise<any | undefined> {
-    const { eq, and } = await import("drizzle-orm");
-    const conditions = [eq(posSessions.userId, userId), eq(posSessions.status, "open")];
+    const { eq, and, or, desc, isNull } = await import("drizzle-orm");
+    
+    // Joint query to ensure we get user info
+    const conditions = [eq(posSessions.status, "open")];
     if (branchId) conditions.push(eq(posSessions.branchId, branchId));
 
-    const [session] = await db.select().from(posSessions).where(and(...conditions)).orderBy(desc(posSessions.startTime));
-    if (!session) return undefined;
+    // We search for sessions where the user is either the one who started it OR part of the same team
+    // But for "Active" check in terminal, it's usually specific to the current authenticated user
+    // However, to be robust we join with users table
+    const [result] = await db.select({
+      session: posSessions,
+      user: {
+        id: users.id,
+        username: users.username,
+        firstName: users.firstName,
+        lastName: users.lastName
+      }
+    })
+    .from(posSessions)
+    .leftJoin(users, eq(posSessions.userId, users.id))
+    .where(and(eq(posSessions.userId, userId), eq(posSessions.status, "open")))
+    .orderBy(desc(posSessions.startTime))
+    .limit(1);
+
+    if (!result) return undefined;
+    const { session, user } = result;
 
     // Calculate totals on the fly
-    const sessionSales = await db.select().from(sales).where(and(eq(sales.sessionId, session.id), eq(sales.paymentStatus, "paid")));
+    const sessionSales = await db.select().from(sales).where(
+      and(
+        eq(sales.sessionId, session.id), 
+        eq(sales.paymentStatus, "paid"),
+        isNull(sales.voidedAt)
+      )
+    );
     const totalSales = sessionSales.reduce((sum, s) => sum + Number(s.totalAmount), 0);
     const totalCashSales = sessionSales.filter(s => s.paymentMethod === 'cash').reduce((sum, s) => sum + Number(s.totalAmount), 0);
 
@@ -2360,6 +2573,7 @@ export class DatabaseStorage implements IStorage {
 
     return {
       ...session,
+      user,
       totalSales,
       totalCashSales,
       pettyCashTotal
@@ -2937,8 +3151,12 @@ export class DatabaseStorage implements IStorage {
       totalUsers: totalUsersResult?.count || 0,
       activeUsers: activeUsersResult?.count || 0,
       activityScore: activityCount?.count || 0,
-      uptime: 99.9, // Simulated
-      storageUsed: 42.5, // Simulated GB
+      uptime: 99.9,
+      systemLoad: 12.5, // Simulated %
+      storageUsed: 42.5 * 1024 * 1024 * 1024, // Simulated (convert to bytes for consistency)
+      storageTotal: 100 * 1024 * 1024 * 1024, // Simulated 100 GB
+      apiCallsToday: 1250, // Simulated
+      apiCallsLimit: 50000, // Simulated
     };
   }
 
@@ -3030,6 +3248,166 @@ export class DatabaseStorage implements IStorage {
     .limit(100);
 
     return results;
+  }
+
+  // === Phase 16: RMA & Sales Returns ===
+  async createSalesReturn(data: InsertSalesReturn & { items: InsertSalesReturnItem[] }): Promise<SalesReturn> {
+    return await db.transaction(async (tx) => {
+      const [newReturn] = await tx.insert(salesReturns).values(data).returning();
+      for (const item of data.items) {
+        await tx.insert(salesReturnItems).values({ ...item, returnId: newReturn.id } as any);
+      }
+      return newReturn;
+    });
+  }
+
+  async completeSalesReturn(id: number): Promise<SalesReturn> {
+    const { eq } = await import("drizzle-orm");
+    return await db.transaction(async (tx) => {
+      const [salesReturn] = await tx.update(salesReturns)
+        .set({ status: "completed" })
+        .where(eq(salesReturns.id, id))
+        .returning();
+
+      if (!salesReturn) throw new Error("Sales Return not found");
+
+      const items = await tx.select().from(salesReturnItems).where(eq(salesReturnItems.returnId, id));
+      
+      let totalCogsReturned = 0;
+
+      for (const item of items) {
+        if (item.restockStatus === "restocked") {
+          const [product] = await tx.select().from(products).where(eq(products.id, item.productId));
+          if (product) {
+            await tx.update(products)
+              .set({ currentStock: product.currentStock + item.quantityReturned })
+              .where(eq(products.id, item.productId));
+
+            const [saleItem] = await tx.select().from(saleItems).where(eq(saleItems.id, item.saleItemId));
+            const originalCogsUnit = saleItem && Number(saleItem.quantity) > 0 
+                ? (Number(saleItem.cogs) / Number(saleItem.quantity)) 
+                : Number(product.unitCost || 0);
+
+            totalCogsReturned += (originalCogsUnit * item.quantityReturned);
+
+            await tx.insert(inventoryLots).values({
+              productId: item.productId,
+              branchId: null, // Central location by default
+              purchasePrice: originalCogsUnit.toString(),
+              initialQuantity: item.quantityReturned,
+              remainingQuantity: item.quantityReturned,
+              inboundDate: new Date(),
+              notes: `Retur Penjualan #${salesReturn.returnNumber}`
+            } as any);
+          }
+        }
+      }
+
+      const { sales, users } = await import("@shared/schema");
+      const [saleInfo] = await tx.select().from(sales).where(eq(sales.id, salesReturn.saleId));
+
+      if (saleInfo) {
+         await this.autoJournalVoid(
+           salesReturn.saleId, 
+           salesReturn.userId, 
+           Number(salesReturn.totalRefundAmount), 
+           totalCogsReturned, 
+           saleInfo.type || "pos", 
+           0, 
+           saleInfo.branchId || undefined, 
+           tx
+         );
+      }
+
+      return salesReturn;
+    });
+  }
+
+  async getSalesReturns(userId: string): Promise<SalesReturn[]> {
+    const { eq, desc } = await import("drizzle-orm");
+    return await db.select()
+      .from(salesReturns)
+      .where(eq(salesReturns.userId, userId))
+      .orderBy(desc(salesReturns.createdAt));
+  }
+
+  // === Phase 9: Stock Transfers (Logistics) ===
+  async getStockTransfers(userId: string): Promise<StockTransfer[]> {
+    const { eq, desc } = await import("drizzle-orm");
+    return await db.select()
+      .from(stockTransfers)
+      .where(eq(stockTransfers.userId, userId))
+      .orderBy(desc(stockTransfers.createdAt));
+  }
+
+  async getStockTransfer(id: number): Promise<StockTransferWithItems | null> {
+    const { eq } = await import("drizzle-orm");
+    const [transfer] = await db.select().from(stockTransfers).where(eq(stockTransfers.id, id));
+    if (!transfer) return null;
+
+    const items = await db.select().from(stockTransferItems).where(eq(stockTransferItems.transferId, id));
+    
+    // Attach products
+    const itemsWithProduct = await Promise.all(items.map(async (item) => {
+      const [product] = await db.select().from(products).where(eq(products.id, item.productId));
+      return { ...item, product };
+    }));
+
+    const [fromBranch] = transfer.fromBranchId ? await db.select().from(branches).where(eq(branches.id, transfer.fromBranchId)) : [null];
+    const [toBranch] = transfer.toBranchId ? await db.select().from(branches).where(eq(branches.id, transfer.toBranchId)) : [null];
+
+    return { ...transfer, items: itemsWithProduct, fromBranch, toBranch } as any;
+  }
+
+  async createStockTransfer(userId: string, data: InsertStockTransfer, items: InsertStockTransferItem[]): Promise<StockTransfer> {
+    return await db.transaction(async (tx) => {
+      const [newTransfer] = await tx.insert(stockTransfers).values(data).returning();
+      for (const item of items) {
+        await tx.insert(stockTransferItems).values({ ...item, transferId: newTransfer.id } as any);
+      }
+      return newTransfer;
+    });
+  }
+
+  async completeStockTransfer(id: number, receivedBy: string): Promise<StockTransfer> {
+    const { eq } = await import("drizzle-orm");
+    return await db.transaction(async (tx) => {
+      const [transfer] = await tx.update(stockTransfers)
+        .set({ status: "received", receivedBy, receivedAt: new Date() })
+        .where(eq(stockTransfers.id, id))
+        .returning();
+
+      if (!transfer) throw new Error("Stock transfer not found");
+
+      const items = await tx.select().from(stockTransferItems).where(eq(stockTransferItems.transferId, id));
+
+      for (const item of items) {
+        // Implement Stock Movement
+        // Asumsi: Outbound (Origin Branch) sudah dikurangi stocknya di createStockTransfer atau saat status "in_transit"
+        // Tapi untuk simplifikasi (karena nggak ada logic Outbound khusus sebelumnya): Kita update global stock kalau cabang diabaikan
+        // ATAU kita tidak ganti global stock, tapi kita bikin mutasi Lot:
+        
+        const receivedQty = item.receivedQuantity || item.quantity;
+
+        // Ambil HPP via FIFO dari fromBranch, lalu pindahkan ke toBranch
+        const originCogs = await this.deductFifoStockAndGetCogs(item.productId, receivedQty, transfer.fromBranchId || undefined, tx);
+        const unitCogs = originCogs / receivedQty;
+
+        // Masukkan kembali ke Lot di toBranch
+        await tx.insert(inventoryLots).values({
+          productId: item.productId,
+          branchId: transfer.toBranchId,
+          purchasePrice: unitCogs.toString(),
+          initialQuantity: receivedQty,
+          remainingQuantity: receivedQty,
+          inboundDate: new Date(),
+          notes: `Penerimaan Mutasi #${transfer.id}`
+        } as any);
+
+      }
+
+      return transfer;
+    });
   }
 
   async getStockLedger(userId: string, productId?: number): Promise<any[]> {

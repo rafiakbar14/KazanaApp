@@ -379,9 +379,9 @@ export default function SaaSConsole() {
                             <div className="flex items-center justify-between">
                                 <div>
                                     <div className="text-2xl font-bold text-green-800">
-                                        {metrics ? metrics.activeUsers.toLocaleString() : "Loading..."}
+                                        {metrics?.activeUsers?.toLocaleString() ?? "0"}
                                         <span className="text-sm font-normal text-muted-foreground ml-2">
-                                            / {metrics ? metrics.totalUsers.toLocaleString() : "0"}
+                                            / {metrics?.totalUsers?.toLocaleString() ?? "0"}
                                         </span>
                                     </div>
                                     <p className="text-xs text-muted-foreground mt-1">Total Users</p>
@@ -725,7 +725,7 @@ export default function SaaSConsole() {
                                                 </div>
                                                 <div className="flex justify-between">
                                                     <span className="text-sm text-muted-foreground">API Calls Today</span>
-                                                    <span className="text-sm font-medium">{metrics ? metrics.apiCallsToday.toLocaleString() : "Loading..."} / {metrics ? metrics.apiCallsLimit.toLocaleString() : "Loading..."}</span>
+                                                    <span className="text-sm font-medium">{metrics?.apiCallsToday?.toLocaleString() ?? "0"} / {metrics?.apiCallsLimit?.toLocaleString() ?? "0"}</span>
                                                 </div>
                                             </div>
                                         </CardContent>

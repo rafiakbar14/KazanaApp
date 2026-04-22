@@ -6,75 +6,114 @@ import bcrypt from "bcryptjs";
 import { db } from "../db";
 import { userRoles } from "@shared/schema";
 import { users } from "@shared/models/auth";
-import { eq, or } from "drizzle-orm";
+import { eq, or, and, gt } from "drizzle-orm";
 import { OAuth2Client } from "google-auth-library";
+import { sendOtpEmail } from "../lib/mailer";
+import { otpCodes } from "@shared/models/auth";
+
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 export function registerAuthRoutes(app: Express): void {
   app.post("/api/auth/register", async (req, res) => {
     try {
-      const { username, password, firstName, lastName } = req.body;
+      const { username, password, email, phone, firstName, lastName } = req.body;
 
-      if (!username || !password) {
-        return res.status(400).json({ message: "Username dan password wajib diisi" });
+      if (!username || !password || !email) {
+        return res.status(400).json({ message: "Username, Password, dan Email wajib diisi" });
       }
 
       if (username.length < 3) {
         return res.status(400).json({ message: "Username minimal 3 karakter" });
       }
 
-      if (password.length < 8 || !/[A-Z]/.test(password) || !/[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]/.test(password)) {
-        return res.status(400).json({ message: "Password minimal 8 karakter, wajib mengandung huruf besar dan karakter spesial" });
+      if (password.length < 8) {
+        return res.status(400).json({ message: "Password minimal 8 karakter" });
       }
 
-      const existing = await authStorage.getUserByUsername(username);
-      if (existing) {
+      // Check if username, email or phone already exists
+      const existingUsername = await authStorage.getUserByUsername(username);
+      if (existingUsername) {
         return res.status(400).json({ message: "Username sudah digunakan" });
       }
 
+      const existingEmail = await authStorage.getUserByEmail(email);
+      if (existingEmail) {
+        return res.status(400).json({ message: "Email sudah digunakan" });
+      }
+
+      if (phone) {
+        const existingPhone = await authStorage.getUserByPhone(phone);
+        if (existingPhone) {
+          return res.status(400).json({ message: "Nomor telepon sudah digunakan" });
+        }
+      }
+
+      // Generate OTP
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      await authStorage.createOtpCode(email, code, expiresAt);
+      
+      const emailSent = await sendOtpEmail(email, code);
+      if (!emailSent) {
+        return res.status(500).json({ message: "Gagal mengirim kode verifikasi ke email" });
+      }
+
+      res.status(200).json({ message: "Kode verifikasi telah dikirim ke email Anda" });
+    } catch (error) {
+      console.error("Register error:", error);
+      res.status(500).json({ message: "Gagal memproses pendaftaran" });
+    }
+  });
+
+  app.post("/api/auth/verify-otp", async (req, res) => {
+    try {
+      const { email, code, username, password, phone, firstName, lastName } = req.body;
+
+      const validOtp = await authStorage.getOtpCode(email, code);
+      if (!validOtp) {
+        return res.status(400).json({ message: "Kode verifikasi salah atau sudah kedaluwarsa" });
+      }
+
+      // Cleanup OTP
+      await authStorage.deleteOtpCode(validOtp.id);
+
+      // Create User
       const hashedPassword = await bcrypt.hash(password, 10);
       const user = await authStorage.createUser({
         username,
         password: hashedPassword,
+        email,
+        phone: phone || null,
         firstName: firstName || null,
         lastName: lastName || null,
         adminId: null,
+        isVerified: 1,
       });
 
-      // Special handling for super admins (rafbarpratama and smpusat get flag on register)
-      const superAdminUsernames = ["rafbarpratama", "smpusat"];
-      if (superAdminUsernames.includes(username)) {
-        await authStorage.updateUser(user.id, {
-          isSuperAdmin: 1,
-          subscribedModules: ["pos", "accounting", "production", "inventory", "admin"],
-        });
-      }
-
+      // Role assignment
       await db.insert(userRoles).values({
         userId: user.id,
         role: "admin",
       });
 
       (req.session as any).userId = user.id;
-
       const { password: _, ...safeUser } = user;
-      
+
       await storage.createActivityLog({
         userId: user.id,
         action: "REGISTER",
-        details: {
-          message: `User registered: ${username}`,
-          ipAddress: req.ip
-        },
+        details: `User registered and verified: ${username}`,
       });
 
       res.status(201).json(safeUser);
     } catch (error) {
-      console.error("Register error:", error);
-      res.status(500).json({ message: "Gagal mendaftar" });
+      console.error("Verify OTP error:", error);
+      res.status(500).json({ message: "Gagal memverifikasi akun" });
     }
   });
+
 
   app.post("/api/auth/login", async (req, res) => {
     try {
@@ -84,10 +123,11 @@ export function registerAuthRoutes(app: Express): void {
         return res.status(400).json({ message: "Username dan password wajib diisi" });
       }
 
-      const user = await authStorage.getUserByUsername(username);
+      const user = await authStorage.getUserByIdentifier(username);
       if (!user) {
-        return res.status(401).json({ message: "Username atau password salah" });
+        return res.status(401).json({ message: "Kredensial atau password salah" });
       }
+
 
       if (!user.password) {
         return res.status(401).json({ message: "Akun ini menggunakan Google Login. Silakan login dengan Google." });
@@ -106,8 +146,13 @@ export function registerAuthRoutes(app: Express): void {
           }
         }).catch(() => {});
         
-        return res.status(401).json({ message: "Username atau password salah" });
+        return res.status(401).json({ message: "Kredensial atau password salah" });
       }
+
+      if (user.isVerified === 0 && !user.googleId) {
+         return res.status(403).json({ message: "Akun Anda belum terverifikasi. Silakan hubungi admin atau cek email Anda." });
+      }
+
       
       if (user.isSuperAdmin === 1) {
         // Ensure super admins have modules locked in upon successful valid login
@@ -190,8 +235,10 @@ export function registerAuthRoutes(app: Express): void {
           firstName,
           lastName,
           profileImageUrl,
-          adminId: null, // Assume new Google users are admins of their own team initially
-          subscribedModules: ["pos"], // Default modules
+          adminId: null,
+          isVerified: 1,
+          subscribedModules: ["pos"],
+
         });
 
         // Assign default role
@@ -431,6 +478,85 @@ export function registerAuthRoutes(app: Express): void {
     } catch (error) {
       console.error("Start trial error:", error);
       res.status(500).json({ message: "Gagal mengaktifkan trial" });
+    }
+  });
+
+  app.post("/api/auth/forgot-password", async (req, res) => {
+    try {
+      const { identifier } = req.body;
+      if (!identifier) {
+        return res.status(400).json({ message: "Username, Email, atau No HP wajib diisi" });
+      }
+
+      const user = await authStorage.getUserByIdentifier(identifier);
+      if (!user) {
+        return res.status(404).json({ message: "Akun tidak ditemukan" });
+      }
+
+      if (!user.email) {
+        return res.status(400).json({ message: "Akun ini tidak memiliki email yang terdaftar untuk pengiriman OTP" });
+      }
+
+      // Generate OTP
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+      await authStorage.createOtpCode(user.email, code, expiresAt);
+      
+      const emailSent = await sendOtpEmail(user.email, code);
+      if (!emailSent) {
+        return res.status(500).json({ message: "Gagal mengirim kode reset ke email" });
+      }
+
+      res.status(200).json({ message: "Kode reset telah dikirim ke email Anda" });
+    } catch (error) {
+      console.error("Forgot password error:", error);
+      res.status(500).json({ message: "Gagal memproses permintaan reset password" });
+    }
+  });
+
+  app.post("/api/auth/reset-password-otp", async (req, res) => {
+    try {
+      const { identifier, code, newPassword } = req.body;
+
+      if (!identifier || !code || !newPassword) {
+        return res.status(400).json({ message: "Semua data wajib diisi" });
+      }
+
+      if (newPassword.length < 8) {
+        return res.status(400).json({ message: "Password baru minimal 8 karakter" });
+      }
+
+      const user = await authStorage.getUserByIdentifier(identifier);
+      if (!user || !user.email) {
+        return res.status(404).json({ message: "Akun tidak ditemukan" });
+      }
+
+      const validOtp = await authStorage.getOtpCode(user.email, code);
+      if (!validOtp) {
+        return res.status(400).json({ message: "Kode verifikasi salah atau sudah kedaluwarsa" });
+      }
+
+      // Cleanup OTP
+      await authStorage.deleteOtpCode(validOtp.id);
+
+      // Reset Password
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
+      await authStorage.updateUser(user.id, { 
+        password: hashedPassword,
+        updatedAt: new Date()
+      });
+
+      await storage.createActivityLog({
+        userId: user.id,
+        action: "RESET_PASSWORD_SELF",
+        details: `User reset password via OTP: ${user.username}`,
+      });
+
+      res.status(200).json({ message: "Password berhasil diperbarui. Silakan login kembali." });
+    } catch (error) {
+      console.error("Reset password otp error:", error);
+      res.status(500).json({ message: "Gagal mereset password" });
     }
   });
 

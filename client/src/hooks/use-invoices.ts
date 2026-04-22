@@ -62,3 +62,29 @@ export function useInvoices() {
         updateStatus,
     };
 }
+
+export function useCreateSalesReturn() {
+    const { toast } = useToast();
+
+    return useMutation({
+        mutationFn: async (data: any) => {
+            const res = await fetch("/api/rma/return", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(data),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.message || "Gagal membuat retur penjualan");
+            }
+            return res.json();
+        },
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: [api.erp.invoices.list.path] });
+            toast({ title: "Retur Berhasil", description: "Pengembalian stok dan pembalikan jurnal telah dieksekusi." });
+        },
+        onError: (err: any) => {
+            toast({ title: "Gagal Mengajukan Retur", description: err.message, variant: "destructive" });
+        },
+    });
+}

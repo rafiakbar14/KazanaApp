@@ -1,4 +1,4 @@
-import { useInboundSession, useAddInboundItem, useRemoveInboundItem, useCompleteInboundSession, useUploadInboundPhoto, useSaveInboundSignatures } from "@/hooks/use-inbound";
+import { useInboundSession, useAddInboundItem, useRemoveInboundItem, useCompleteInboundSession, useUploadInboundPhoto, useSaveInboundSignatures, usePayAccountsPayable } from "@/hooks/use-inbound";
 import { useProducts } from "@/hooks/use-products";
 import { useParams, useLocation } from "wouter";
 import { ArrowLeft, Plus, Search, Loader2, Trash2, Camera, User, CheckCircle2, History, Save, PackagePlus, FileCheck, ClipboardEdit, Sparkles, X, ChevronRight, Calendar, AlertCircle } from "lucide-react";
@@ -27,6 +27,7 @@ export default function InboundDetail() {
     const [addItemOpen, setAddItemOpen] = useState(false);
     const [selectedProduct, setSelectedProduct] = useState<number | null>(null);
     const [quantity, setQuantity] = useState<number>(1);
+    const [unitCost, setUnitCost] = useState<number>(0);
     const [itemNotes, setItemNotes] = useState("");
     const [expiryDate, setExpiryDate] = useState<string>("");
 
@@ -38,10 +39,12 @@ export default function InboundDetail() {
     const addInboundItem = useAddInboundItem();
     const removeInboundItem = useRemoveInboundItem();
     const completeSession = useCompleteInboundSession();
+    const payAccountsPayable = usePayAccountsPayable();
     const uploadPhoto = useUploadInboundPhoto();
     const saveSignatures = useSaveInboundSignatures();
 
     const isCompleted = session?.status === "completed";
+    const isPaid = session?.notes?.includes("[LUNAS]");
     const canModify = !isCompleted && (isAdmin || isSKUManager);
 
     // Sync state with session data when loaded
@@ -70,6 +73,7 @@ export default function InboundDetail() {
             sessionId,
             productId: selectedProduct,
             quantityReceived: quantity,
+            unitCost: unitCost.toString(),
             notes: itemNotes,
             expiryDate: expiryDate ? new Date(expiryDate).toISOString() : null
         }, {
@@ -77,6 +81,7 @@ export default function InboundDetail() {
                 setAddItemOpen(false);
                 setSelectedProduct(null);
                 setQuantity(1);
+                setUnitCost(0);
                 setItemNotes("");
                 setExpiryDate("");
                 setSearch("");
@@ -122,6 +127,12 @@ export default function InboundDetail() {
                 toast({ title: "Sesi Selesai", description: "Penerimaan barang telah difinalisasi ke sistem stok." });
             }
         });
+    };
+
+    const handlePaySupplier = () => {
+        if (confirm("Pelunasan ini akan otomatis membuat Jurnal Pembalik Kas terhadap Hutang Usaha (Accounts Payable). Lanjutkan?")) {
+            payAccountsPayable.mutate(sessionId);
+        }
     };
 
     if (isLoading) {
@@ -185,6 +196,17 @@ export default function InboundDetail() {
                         Selesaikan Penerimaan
                     </Button>
                 )}
+
+                {isCompleted && !isPaid && (isAdmin || isSKUManager) && (
+                    <Button 
+                        onClick={handlePaySupplier} 
+                        disabled={payAccountsPayable.isPending} 
+                        className="rounded-2xl h-16 px-10 bg-indigo-600 text-white font-black shadow-xl shadow-indigo-100 hover:bg-indigo-700 hover:scale-105 transition-all outline-none focus:ring-4 focus:ring-indigo-100"
+                    >
+                        {payAccountsPayable.isPending ? <Loader2 className="w-6 h-6 animate-spin" /> : <CheckCircle2 className="w-6 h-6 mr-3" />}
+                        Bayar Supplier (Lunas)
+                    </Button>
+                )}
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
@@ -236,12 +258,16 @@ export default function InboundDetail() {
                                                         {item.product.sku}
                                                     </Badge>
                                                 </div>
-                                                <div className="flex items-center gap-4">
-                                                    <div className="flex items-center gap-2 bg-primary/5 px-3 py-1.5 rounded-xl border border-primary/10">
-                                                        <span className="text-[10px] font-black text-primary uppercase">Jumlah:</span>
-                                                        <span className="text-lg font-black text-primary leading-none">{item.quantityReceived}</span>
-                                                    </div>
-                                                    {item.expiryDate && (
+                                                    <div className="flex items-center gap-4">
+                                                        <div className="flex items-center gap-2 bg-primary/5 px-3 py-1.5 rounded-xl border border-primary/10">
+                                                            <span className="text-[10px] font-black text-primary uppercase">Jumlah:</span>
+                                                            <span className="text-lg font-black text-primary leading-none">{item.quantityReceived}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-2 bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-100">
+                                                            <span className="text-[10px] font-black text-emerald-600 uppercase">Harga:</span>
+                                                            <span className="text-sm font-black text-emerald-700 leading-none">Rp {Number(item.unitCost || 0).toLocaleString()}</span>
+                                                        </div>
+                                                        {item.expiryDate && (
                                                         <div className="flex items-center gap-2 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-100 text-amber-600">
                                                             <Calendar className="w-3.5 h-3.5" />
                                                             <span className="text-[10px] font-black uppercase">EXP: {new Date(item.expiryDate).toLocaleDateString("id-ID")}</span>
@@ -446,7 +472,7 @@ export default function InboundDetail() {
                             </div>
 
                             {/* Inputs */}
-                            <div className="grid grid-cols-2 gap-6">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <div className="space-y-3">
                                     <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block pl-1">Jumlah Diterima</label>
                                     <div className="relative">
@@ -461,7 +487,20 @@ export default function InboundDetail() {
                                     </div>
                                 </div>
                                 <div className="space-y-3">
-                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block pl-1">Tanggal Expired (Jika ada)</label>
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block pl-1">Harga Beli / Unit</label>
+                                    <div className="relative">
+                                        <span className="absolute left-4 top-1/2 -translate-y-1/2 font-black text-slate-300">Rp</span>
+                                        <Input
+                                            type="number"
+                                            className="h-16 pl-12 bg-slate-50 border-slate-200 rounded-2xl text-xl font-black text-slate-900"
+                                            value={unitCost}
+                                            onChange={(e) => setUnitCost(parseFloat(e.target.value) || 0)}
+                                            min={0}
+                                        />
+                                    </div>
+                                </div>
+                                <div className="space-y-3">
+                                    <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest block pl-1">Tanggal Expired</label>
                                     <div className="relative">
                                         <Calendar className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300" />
                                         <Input

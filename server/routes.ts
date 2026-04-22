@@ -22,6 +22,7 @@ import { moduleSubscriptions } from "@shared/schema";
 import { createTransactionToken, verifyWebhookSignature } from "./lib/midtrans";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { generateBusinessInsights, generateProductionAdvice } from "./ai";
+import crypto from "crypto";
 
 
 const upload = multer({ dest: path.join(os.tmpdir(), "kazana-uploads"), limits: { fileSize: 50 * 1024 * 1024 } });
@@ -1799,9 +1800,26 @@ export async function registerRoutes(
     }
   });
 
+  // === ERP Invoices ===
+  app.get(api.erp.invoices.list.path, isAuthenticated, async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      console.log(`>>> [GET /api/sales/invoices] FETCHING FOR USER: ${userId}`);
+      const invoices = await storage.getInvoices(userId);
+      console.log(`>>> [GET /api/sales/invoices] SUCCESS: ${invoices.length} invoices found`);
+      res.json(invoices);
+    } catch (err: any) {
+      console.error(">>> [GET /api/sales/invoices] ERROR MESSAGE:", err.message);
+      console.error(">>> [GET /api/sales/invoices] ERROR STACK:", err.stack);
+      res.status(500).json({ message: "Gagal mengambil daftar invoice", error: err.message });
+    }
+  });
+
   app.get(api.pos.sales.get.path, isAuthenticated, async (req, res) => {
     try {
       const id = Number(req.params.id);
+      if (isNaN(id)) return; // Let next routes handle it (though technically this route shouldn't have matched if it's not a number, but express matches anything for :id)
+
       const sale = await storage.getSale(id);
       if (!sale) return res.status(404).json({ message: "Transaksi tidak ditemukan" });
       res.json(sale);
@@ -1810,32 +1828,43 @@ export async function registerRoutes(
     }
   });
 
-  // === ERP Invoices ===
-  app.get(api.erp.invoices.list.path, isAuthenticated, async (req, res) => {
-    try {
-      const userId = getUserId(req);
-      const invoices = await storage.getInvoices(userId);
-      res.json(invoices);
-    } catch (err) {
-      res.status(500).json({ message: "Gagal mengambil daftar invoice" });
-    }
-  });
-
   app.post(api.erp.invoices.create.path, isAuthenticated, async (req, res) => {
     try {
+      console.log(">>> [POST /api/sales/invoices] RECEIVED DATA:", JSON.stringify(req.body, null, 2));
       const userId = getUserId(req);
-      const { items, ...saleData } = req.body;
-      const sale = await storage.createSale({
+      const { items, ...saleRaw } = req.body;
+
+      // Fix dueDate: ISO String -> Date object for Zod compatibility
+      const saleData = { ...saleRaw };
+      if (saleData.dueDate && typeof saleData.dueDate === 'string') {
+        saleData.dueDate = new Date(saleData.dueDate);
+      }
+
+      // Re-enable strict Zod validation
+      const validatedSale = insertSaleSchema.parse({
         ...saleData,
         userId,
         type: "erp_invoice",
         uuid: crypto.randomUUID(),
         createdAt: new Date()
-      }, items);
+      });
+
+      const validatedItems = (items || []).map((i: any) => insertSaleItemSchema.parse(i));
+
+      const sale = await storage.createSale(validatedSale, validatedItems);
+      console.log(">>> [POST /api/sales/invoices] SUCCESS:", sale.id);
       res.status(201).json(sale);
-    } catch (err) {
-      console.error("Invoice Error:", err);
-      res.status(500).json({ message: "Gagal membuat invoice" });
+    } catch (err: any) {
+      if (err instanceof z.ZodError) {
+        console.error(">>> [POST /api/sales/invoices] ZOD ERROR:", JSON.stringify(err.issues, null, 2));
+      } else {
+        console.error(">>> [POST /api/sales/invoices] ERROR MESSAGE:", err.message);
+      }
+      res.status(500).json({
+        message: "Gagal membuat invoice",
+        error: err.message,
+        issues: err instanceof z.ZodError ? err.issues : undefined
+      });
     }
   });
 
@@ -1848,6 +1877,42 @@ export async function registerRoutes(
       res.json({ message: "Status invoice diperbarui" });
     } catch (err) {
       res.status(500).json({ message: "Gagal memperbarui status invoice" });
+    }
+  });
+
+  // === Phase 16: RMA & Sales Returns ===
+  app.get(api.pos.sales.returns.list.path, isAuthenticated, async (req, res) => {
+    try {
+      const userId = await getTeamAdminId(req);
+      const returns = await storage.getSalesReturns(userId);
+      res.json(returns);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal mengambil daftar retur penjualan" });
+    }
+  });
+
+  app.post(api.pos.sales.returns.create.path, isAuthenticated, requireRole("admin", "sku_manager", "cashier"), async (req, res) => {
+    try {
+      const userId = await getTeamAdminId(req);
+      const { items, ...returnData } = api.pos.sales.returns.create.input.parse(req.body);
+      const salesReturn = await storage.createSalesReturn({
+        ...returnData,
+        userId
+      } as any);
+      res.status(201).json(salesReturn);
+    } catch (err: any) {
+      console.error(">>> [POST /api/sales/returns] ERROR:", err);
+      res.status(500).json({ message: "Gagal membuat retur penjualan", error: err.message });
+    }
+  });
+
+  app.post(api.pos.sales.returns.complete.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const salesReturn = await storage.completeSalesReturn(id);
+      res.json(salesReturn);
+    } catch (err: any) {
+      res.status(500).json({ message: "Gagal menyelesaikan retur penjualan", error: err.message });
     }
   });
 
@@ -2006,7 +2071,7 @@ export async function registerRoutes(
     try {
       const userId = getUserId(req);
       const { sessionId, amount, description, type } = req.body;
-      
+
       // Audit: Verify session ownership and status
       const activeSession = await storage.getActivePOSSession(userId);
       if (!activeSession || activeSession.id !== Number(sessionId)) {
@@ -2117,7 +2182,7 @@ export async function registerRoutes(
   });
 
   // === Store Settings ===
-  app.get(api.settings.get.path, isAuthenticated, requireRole("admin"), async (req, res) => {
+  app.get(api.settings.get.path, isAuthenticated, async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const s = await storage.getSettings(adminId);
@@ -3084,22 +3149,40 @@ Pastikan output hanya berisi JSON array tersebut agar bisa di-parse secara otoma
       const balances: Record<number, number> = {};
       accounts.forEach(a => balances[a.id] = 0);
 
+      let netProfitLoss = 0;
       entries.forEach(e => {
         e.items.forEach(i => {
           const acc = accounts.find(a => a.id === i.accountId);
           if (acc) {
-            // Asset/Expense: Debit + , Credit -
-            // Liability/Equity/Income: Debit - , Credit +
             if (acc.type === 'asset' || acc.type === 'expense') {
               balances[i.accountId] += (i.debit - i.credit);
             } else {
               balances[i.accountId] += (i.credit - i.debit);
             }
+
+            // Collect Income/Expense for consolidation into Equity
+            if (acc.type === 'income') netProfitLoss += (i.credit - i.debit);
+            if (acc.type === 'expense') netProfitLoss -= (i.debit - i.credit);
           }
         });
       });
 
-      res.json(accounts.map(a => ({ ...a, balance: balances[a.id] || 0 })));
+      const balanceSheetAccounts = accounts.filter(a => a.type !== 'income' && a.type !== 'expense').map(a => ({
+        ...a,
+        balance: balances[a.id] || 0
+      }));
+
+      // Add Current Period Profit/Loss as a dynamic Equity row if not zero
+      balanceSheetAccounts.push({
+        id: 999999, // Pseudo ID
+        code: "3999",
+        name: "Laba Rugi Tahun Berjalan",
+        type: "equity" as any,
+        userId: adminId,
+        balance: netProfitLoss
+      } as any);
+
+      res.json(balanceSheetAccounts);
     } catch (e) {
       res.status(500).json({ message: "Gagal membuat laporan Neraca" });
     }
@@ -3314,9 +3397,9 @@ Pastikan output hanya berisi JSON array tersebut agar bisa di-parse secara otoma
         qty: saleItems.quantity,
         type: sql`'OUT (SALE)'`
       })
-      .from(saleItems)
-      .innerJoin(sales, eq(saleItems.saleId, sales.id))
-      .where(and(eq(saleItems.productId, productId), eq(sales.userId, adminId)));
+        .from(saleItems)
+        .innerJoin(sales, eq(saleItems.saleId, sales.id))
+        .where(and(eq(saleItems.productId, productId), eq(sales.userId, adminId)));
 
       for (const sale of salesData) {
         history.push({
@@ -3334,9 +3417,9 @@ Pastikan output hanya berisi JSON array tersebut agar bisa di-parse secara otoma
         date: inboundSessions.createdAt,
         qty: inboundItems.quantity,
       })
-      .from(inboundItems)
-      .innerJoin(inboundSessions, eq(inboundItems.sessionId, inboundSessions.id))
-      .where(and(eq(inboundItems.productId, productId), eq(inboundSessions.userId, adminId)));
+        .from(inboundItems)
+        .innerJoin(inboundSessions, eq(inboundItems.sessionId, inboundSessions.id))
+        .where(and(eq(inboundItems.productId, productId), eq(inboundSessions.userId, adminId)));
 
       for (const item of inboundData) {
         history.push({
@@ -3354,9 +3437,9 @@ Pastikan output hanya berisi JSON array tersebut agar bisa di-parse secara otoma
         date: outboundSessions.createdAt,
         qty: outboundItems.quantity,
       })
-      .from(outboundItems)
-      .innerJoin(outboundSessions, eq(outboundItems.sessionId, outboundSessions.id))
-      .where(and(eq(outboundItems.productId, productId), eq(outboundSessions.userId, adminId)));
+        .from(outboundItems)
+        .innerJoin(outboundSessions, eq(outboundItems.sessionId, outboundSessions.id))
+        .where(and(eq(outboundItems.productId, productId), eq(outboundSessions.userId, adminId)));
 
       for (const item of outboundData) {
         history.push({
@@ -3409,7 +3492,7 @@ Pastikan output hanya berisi JSON array tersebut agar bisa di-parse secara otoma
       const to = req.query.to ? new Date(req.query.to as string) : undefined;
 
       const salesList = await storage.getSales(adminId);
-      
+
       const filteredSales = salesList.filter(s => {
         const d = new Date(s.createdAt);
         if (from && d < from) return false;
@@ -4722,7 +4805,7 @@ Tugas Anda:
     try {
       const adminId = getUserId(req);
       const logs = await storage.getSaaSActivityLogs(adminId);
-      
+
       // Transform logs to alerts format if needed, or just return them
       const alerts = logs.map(log => ({
         id: log.id.toString(),
@@ -4778,7 +4861,7 @@ Tugas Anda:
       const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
 
       const wb = XLSX.utils.book_new();
-      
+
       if (type === "summary") {
         const summary = await storage.getSalesSummary(adminId, startDate, endDate);
         const data = [
@@ -4821,6 +4904,463 @@ Tugas Anda:
       res.json(ledger);
     } catch (err) {
       res.status(500).json({ message: "Gagal mengambil kartu stok" });
+    }
+  });
+
+  // ================================================================
+  // PATCH: Missing Endpoints (Audit 19 Apr 2026)
+  // ================================================================
+
+  // --- 1. GET /api/sales/find/:uuid — Search sale by UUID or orderId ---
+  app.get("/api/sales/find/:uuid", isAuthenticated, async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const uuid = req.params.uuid;
+
+      const { sales, saleItems, products: productsTable, customers } = await import("@shared/schema");
+      const { eq, and, or, sql } = await import("drizzle-orm");
+
+      // Search by uuid OR orderId
+      const [sale] = await db.select().from(sales).where(
+        and(
+          eq(sales.userId, adminId),
+          or(eq(sales.uuid, uuid), sql`${sales.orderId} = ${uuid}`)
+        )
+      );
+
+      if (!sale) {
+        return res.status(404).json({ message: "Nota tidak ditemukan" });
+      }
+
+      // Get sale items with product info
+      const items = await db.select({
+        id: saleItems.id,
+        saleId: saleItems.saleId,
+        productId: saleItems.productId,
+        quantity: saleItems.quantity,
+        price: saleItems.price,
+        cogs: saleItems.cogs,
+        product: {
+          id: productsTable.id,
+          name: productsTable.name,
+          sku: productsTable.sku,
+        }
+      })
+        .from(saleItems)
+        .leftJoin(productsTable, eq(saleItems.productId, productsTable.id))
+        .where(eq(saleItems.saleId, sale.id));
+
+      // Get customer if exists
+      let customer = null;
+      if (sale.customerId) {
+        const [c] = await db.select().from(customers).where(eq(customers.id, sale.customerId));
+        customer = c || null;
+      }
+
+      res.json({ ...sale, items, customer });
+    } catch (err: any) {
+      console.error(">>> [GET /api/sales/find] ERROR:", err);
+      res.status(500).json({ message: "Gagal mencari nota penjualan" });
+    }
+  });
+
+  // --- 2. GET /api/rma/list — List voided sales as "return history" ---
+  app.get("/api/rma/list", isAuthenticated, async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const { sales, saleItems, customers, products: productsTable } = await import("@shared/schema");
+      const { eq, and, desc: descOrder } = await import("drizzle-orm");
+
+      // Get voided sales as "returns"
+      const voidedSales = await db.select().from(sales).where(
+        and(eq(sales.userId, adminId), eq(sales.status, "voided"))
+      ).orderBy(descOrder(sales.createdAt)).limit(100);
+
+      const result = [];
+      for (const sale of voidedSales) {
+        let customer = null;
+        if (sale.customerId) {
+          const [c] = await db.select().from(customers).where(eq(customers.id, sale.customerId));
+          customer = c || null;
+        }
+
+        result.push({
+          id: sale.id,
+          returnNumber: `RMA-${sale.id}`,
+          saleId: sale.id,
+          reason: sale.notes || "void",
+          refundAmount: sale.totalAmount,
+          refundMethod: "cash",
+          status: "completed",
+          notes: sale.notes || "",
+          createdAt: sale.updatedAt || sale.createdAt,
+          sale: {
+            id: sale.id,
+            uuid: sale.uuid,
+            orderId: sale.orderId,
+            customer,
+          }
+        });
+      }
+
+      res.json(result);
+    } catch (err: any) {
+      console.error(">>> [GET /api/rma/list] ERROR:", err);
+      res.status(500).json({ message: "Gagal mengambil riwayat retur" });
+    }
+  });
+
+  // --- 3. POST /api/rma/return — Process a return (void + restock) ---
+  app.post("/api/rma/return", isAuthenticated, async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const { saleId, returnNumber, reason, refundAmount, refundMethod, notes, items } = req.body;
+
+      if (!saleId || !items || items.length === 0) {
+        return res.status(400).json({ message: "Data retur tidak valid" });
+      }
+
+      const { sales, saleItems, products: productsTable, inventoryLots, activityLogs } = await import("@shared/schema");
+      const { eq, sql } = await import("drizzle-orm");
+
+      const [sale] = await db.select().from(sales).where(eq(sales.id, saleId));
+      if (!sale) {
+        return res.status(404).json({ message: "Penjualan tidak ditemukan" });
+      }
+      if (sale.voidedAt !== null) {
+        return res.status(400).json({ message: "Penjualan ini sudah di-void sebelumnya" });
+      }
+
+      await db.transaction(async (tx) => {
+        // 1. Mark sale as voided
+        await tx.update(sales)
+          .set({ voidedAt: new Date(), voidedBy: req.user!.id.toString(), notes: `[RMA] ${reason}: ${notes || ""}` })
+          .where(eq(sales.id, saleId));
+
+        // 2. Restock items with accurate COGS
+        const sItems = await tx.select().from(saleItems).where(eq(saleItems.saleId, saleId));
+        let totalCogsCalculated = 0;
+
+        for (const item of items) {
+          const originalItem = sItems.find(si => si.productId === item.productId);
+          if (originalItem) {
+            totalCogsCalculated += Number(originalItem.cogs || 0);
+          }
+
+          if (item.restockStatus === "restocked" && item.quantityReturned > 0) {
+            // Increase product stock
+            await tx.update(productsTable)
+              .set({ currentStock: sql`${productsTable.currentStock} + ${item.quantityReturned}` })
+              .where(eq(productsTable.id, item.productId));
+
+            // Find original COGS unit for this item
+            const product = await tx.select().from(productsTable).where(eq(productsTable.id, item.productId)).then(res => res[0]);
+
+            const originalCogsUnit = (originalItem && originalItem.quantity > 0)
+              ? (Number(originalItem.cogs) / Number(originalItem.quantity))
+              : Number(product?.unitCost || 0);
+
+            // Create inventory lot for restocked items using original price
+            await tx.insert(inventoryLots).values({
+              productId: item.productId,
+              branchId: sale.branchId,
+              purchasePrice: originalCogsUnit.toString(),
+              initialQuantity: item.quantityReturned,
+              remainingQuantity: item.quantityReturned,
+              inboundDate: new Date(),
+              notes: `Restock dari retur #${sale.invoiceNumber}`
+            });
+
+            // LOG: Stock in from return
+            await tx.insert(activityLogs).values({
+              userId: req.user!.id.toString(),
+              branchId: sale.branchId || undefined,
+              entityType: "product",
+              entityId: item.productId,
+              action: "STOCK_IN",
+              details: {
+                type: "rma_restock",
+                reference: sale.invoiceNumber,
+                quantity: item.quantityReturned,
+                reason
+              }
+            });
+          }
+        }
+
+        // 3. Create reversing journal entries
+        const totalAmount = Number(sale.totalAmount || 0);
+        const taxAmount = Number(sale.taxAmount || 0);
+        await storage.autoJournalVoid(saleId, adminId, totalAmount, totalCogsCalculated, sale.type || "pos", taxAmount, sale.branchId || undefined, tx);
+
+        // 4. Reverse loyalty points (Both Earned and Spent)
+        if (sale.customerId) {
+          const { customerLoyaltyLedger, customers } = await import("@shared/schema");
+
+          // A. Reclaim Earned Points (Divisor 1000)
+          const earnedPoints = Math.floor(totalAmount / 1000);
+
+          // B. Return Spent Points
+          const spentPoints = Number(sale.pointsRedeemed || 0);
+
+          const netPointsToReverse = spentPoints - earnedPoints; // Net balance to add/sub from customer
+
+          if (earnedPoints > 0) {
+            await tx.insert(customerLoyaltyLedger).values({
+              customerId: sale.customerId,
+              pointsDelta: -earnedPoints,
+              action: "voided",
+              saleId,
+              note: `Penarikan poin (Void) - RMA #${saleId}`,
+              userId: adminId
+            } as any);
+          }
+
+          if (spentPoints > 0) {
+            await tx.insert(customerLoyaltyLedger).values({
+              customerId: sale.customerId,
+              pointsDelta: spentPoints,
+              action: "voided",
+              saleId,
+              note: `Pengembalian poin (Pernah ditukar) - RMA #${saleId}`,
+              userId: adminId
+            } as any);
+          }
+
+          // Update customer balance
+          const [customer] = await tx.select().from(customers).where(eq(customers.id, sale.customerId));
+          if (customer) {
+            await tx.update(customers)
+              .set({ points: Math.max(0, (customer.points || 0) + netPointsToReverse) })
+              .where(eq(customers.id, sale.customerId));
+          }
+        }
+      });
+
+      res.json({ success: true, returnNumber: returnNumber || `RMA-${saleId}` });
+    } catch (err: any) {
+      console.error(">>> [POST /api/rma/return] ERROR:", err);
+      res.status(500).json({ message: err.message || "Gagal memproses retur" });
+    }
+  });
+
+  // --- 4. POST /api/inbound-sessions/:id/pay — Pay supplier (Accounts Payable) ---
+  app.post("/api/inbound-sessions/:id/pay", isAuthenticated, requireRole("admin"), async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const sessionId = Number(req.params.id);
+
+      const { inboundSessions, inboundItems } = await import("@shared/schema");
+      const { eq } = await import("drizzle-orm");
+
+      const [session] = await db.select().from(inboundSessions).where(eq(inboundSessions.id, sessionId));
+      if (!session) {
+        return res.status(404).json({ message: "Sesi inbound tidak ditemukan" });
+      }
+
+      // Calculate total cost
+      const items = await db.select().from(inboundItems).where(eq(inboundItems.sessionId, sessionId));
+      let totalCost = 0;
+      for (const item of items) {
+        totalCost += Number(item.quantityReceived || 0) * Number(item.unitCost || 0);
+      }
+
+      if (totalCost <= 0) {
+        return res.status(400).json({ message: "Tidak ada nilai hutang untuk dilunaskan (total = 0)" });
+      }
+
+      // Create payment journal: Debit Hutang Usaha (2101), Credit Kas (1101)
+      await storage.ensureDefaultAccounts(adminId);
+      const userAccounts = await storage.getAccounts(adminId);
+      const findAccount = (code: string) => userAccounts.find(a => a.code === code);
+
+      const payableAcc = findAccount("2101"); // Hutang Usaha
+      const cashAcc = findAccount("1101");     // Kas
+
+      if (!payableAcc || !cashAcc) {
+        return res.status(500).json({ message: "Akun keuangan belum tersedia" });
+      }
+
+      await storage.createJournalEntry(
+        {
+          description: `Pelunasan Hutang Usaha - Inbound #${session.id} (${session.title || ''})`,
+          reference: `PAY-INB-${session.id}`,
+          userId: adminId,
+          date: new Date()
+        },
+        [
+          { accountId: payableAcc.id, debit: totalCost, credit: 0, userId: adminId, branchId: session.branchId },
+          { accountId: cashAcc.id, debit: 0, credit: totalCost, userId: adminId, branchId: session.branchId },
+        ]
+      );
+
+      // Mark session as paid (update notes)
+      await db.update(inboundSessions)
+        .set({ notes: `${session.notes || ''} [PAID]`.trim() })
+        .where(eq(inboundSessions.id, sessionId));
+
+      res.json({ success: true, amount: totalCost });
+    } catch (err: any) {
+      console.error(">>> [POST /api/inbound-sessions/:id/pay] ERROR:", err);
+      res.status(500).json({ message: err.message || "Gagal melunaskan hutang" });
+    }
+  });
+
+  // --- 5. POST /api/pos/verify-admin — Verify admin password for void authorization ---
+  app.post("/api/pos/verify-admin", isAuthenticated, async (req, res) => {
+    try {
+      const { password } = req.body;
+      if (!password) {
+        return res.status(400).json({ message: "Password wajib diisi" });
+      }
+
+      const adminId = await getTeamAdminId(req);
+      const { users } = await import("@shared/schema");
+      const { eq, and, or } = await import("drizzle-orm");
+      const crypto = await import("crypto");
+
+      // Find admin or sku_manager users
+      const adminUsers = await db.select().from(users).where(
+        and(
+          or(eq(users.id, adminId), eq(users.teamOwnerId, adminId)),
+          or(eq(users.role, "admin"), eq(users.role, "sku_manager"))
+        )
+      );
+
+      // Verify password against any admin/manager account
+      for (const user of adminUsers) {
+        if (!user.password) continue;
+
+        // Check both raw and hashed passwords
+        const inputHash = crypto.createHash("sha256").update(password).digest("hex");
+        if (user.password === password || user.password === inputHash) {
+          return res.json({
+            verified: true,
+            adminName: user.firstName ? `${user.firstName} ${user.lastName || ""}`.trim() : user.username,
+            role: user.role
+          });
+        }
+
+        // Also check via scrypt if available (passport-local style)
+        try {
+          const [hashed, salt] = user.password.split(".");
+          if (salt) {
+            const derivedKey = crypto.scryptSync(password, salt, 64);
+            if (derivedKey.toString("hex") === hashed) {
+              return res.json({
+                verified: true,
+                adminName: user.firstName ? `${user.firstName} ${user.lastName || ""}`.trim() : user.username,
+                role: user.role
+              });
+            }
+          }
+        } catch { /* not scrypt format, skip */ }
+      }
+
+      res.status(401).json({ verified: false, message: "Password Admin salah" });
+    } catch (err: any) {
+      console.error(">>> [POST /api/pos/verify-admin] ERROR:", err);
+      res.status(500).json({ message: "Gagal memverifikasi admin" });
+    }
+  });
+
+  // --- 6. Petty Cash (Kas Kecil) Endpoints ---
+
+  // POST /api/pos/petty-cash - Record petty cash in/out
+  app.post("/api/pos/petty-cash", isAuthenticated, async (req, res) => {
+    try {
+      const { amount, description, type, sessionId } = req.body;
+
+      if (!amount || !description || !type || !sessionId) {
+        return res.status(400).json({ message: "Data tidak lengkap" });
+      }
+
+      const { posPettyCash } = await import("@shared/schema");
+
+      const [entry] = await db.insert(posPettyCash).values({
+        sessionId: parseInt(sessionId.toString()),
+        amount: amount.toString(),
+        description,
+        type,
+      }).returning();
+
+      // Log activity
+      const { activityLogs } = await import("@shared/schema");
+      await db.insert(activityLogs).values({
+        userId: req.user!.id.toString(),
+        action: "create",
+        entityType: "petty_cash",
+        entityId: entry.id,
+        details: { sessionId, type, amount, description },
+      });
+
+      // 3. Automated Journal Entry (Reflect in Accounting)
+      await storage.autoJournalPettyCash(
+        parseInt(sessionId.toString()),
+        type as "in" | "out",
+        Number(amount),
+        description,
+        req.user!.id.toString()
+      );
+
+      res.json(entry);
+    } catch (err: any) {
+      console.error(">>> [POST /api/pos/sessions/:id/petty-cash] ERROR:", err);
+      res.status(500).json({ message: err.message || "Gagal mencatat kas kecil" });
+    }
+  });
+
+  // GET /api/admin/petty-cash-report - Admin report for petty cash
+  app.get("/api/admin/petty-cash-report", isAuthenticated, requireRole("admin"), async (req, res) => {
+    try {
+      const { sessionId, from, to } = req.query;
+      const { posPettyCash, posSessions } = await import("@shared/schema");
+      const { eq, and, gte, lte, desc } = await import("drizzle-orm");
+
+      let conditions = [];
+
+      if (sessionId) {
+        conditions.push(eq(posPettyCash.sessionId, parseInt(sessionId as string)));
+      }
+
+      if (from) {
+        conditions.push(gte(posPettyCash.createdAt, new Date(from as string)));
+      }
+
+      if (to) {
+        conditions.push(lte(posPettyCash.createdAt, new Date(to as string)));
+      }
+
+      const query = db
+        .select({
+          id: posPettyCash.id,
+          createdAt: posPettyCash.createdAt,
+          sessionId: posPettyCash.sessionId,
+          sessionNotes: posSessions.notes,
+          description: posPettyCash.description,
+          type: posPettyCash.type,
+          amount: posPettyCash.amount,
+        })
+        .from(posPettyCash)
+        .innerJoin(posSessions, eq(posPettyCash.sessionId, posSessions.id))
+        .orderBy(desc(posPettyCash.createdAt));
+
+      if (conditions.length > 0) {
+        query.where(and(...conditions));
+      }
+
+      const results = await query;
+
+      // Convert decimal string to number for frontend
+      const formattedResults = results.map(r => ({
+        ...r,
+        amount: Number(r.amount)
+      }));
+
+      res.json(formattedResults);
+    } catch (err: any) {
+      console.error(">>> [GET /api/admin/petty-cash-report] ERROR:", err);
+      res.status(500).json({ message: "Gagal mengambil laporan kas kecil" });
     }
   });
 

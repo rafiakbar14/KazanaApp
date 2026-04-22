@@ -30,6 +30,8 @@ import {
   insertProductBundleSchema,
   insertCategorySchema,
   insertUnitSchema,
+  insertSalesReturnSchema,
+  insertSalesReturnItemSchema,
 } from "./schema";
 
 export const errorSchemas = {
@@ -530,6 +532,23 @@ export const api = {
         method: "GET" as const,
         path: "/api/sales/:id" as const,
       },
+      returns: {
+        list: {
+          method: "GET" as const,
+          path: "/api/sales/returns" as const,
+        },
+        create: {
+          method: "POST" as const,
+          path: "/api/sales/returns" as const,
+          input: insertSalesReturnSchema.omit({ userId: true, createdAt: true }).extend({
+            items: z.array(insertSalesReturnItemSchema.omit({ returnId: true }))
+          }),
+        },
+        complete: {
+          method: "POST" as const,
+          path: "/api/sales/returns/:id/complete" as const,
+        }
+      }
     },
     updatePin: {
       method: "POST" as const,

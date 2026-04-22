@@ -2,10 +2,13 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/use-auth";
 import { useToast } from "@/hooks/use-toast";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { User, Loader2, AlertCircle, CheckCircle2, ImagePlus, Store, History } from "lucide-react";
+import { User, Loader2, AlertCircle, CheckCircle2, ImagePlus, Store, History, ShieldInfo } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
+
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { api } from "@shared/routes";
 import { Settings } from "@shared/schema";
@@ -63,19 +66,27 @@ export default function Profile() {
   const [storeName, setStoreName] = useState("");
   const [storeAddress, setStoreAddress] = useState("");
   const [storePhone, setStorePhone] = useState("");
+  const [storeEmail, setStoreEmail] = useState("");
+  const [picName, setPicName] = useState("");
   const [storeLogo, setStoreLogo] = useState("");
   const [fastMovingThreshold, setFastMovingThreshold] = useState(30);
   const [slowMovingThreshold, setSlowMovingThreshold] = useState(60);
+  const [hideBranding, setHideBranding] = useState(false);
+
 
   useEffect(() => {
     if (settings) {
       setStoreName((settings as any).storeName || "Kazana Shop");
       setStoreAddress((settings as any).storeAddress || "");
       setStorePhone((settings as any).storePhone || "");
+      setStoreEmail((settings as any).storeEmail || "");
+      setPicName((settings as any).picName || "");
       setStoreLogo((settings as any).storeLogo || "");
       setFastMovingThreshold((settings as any).fastMovingThreshold || 30);
       setSlowMovingThreshold((settings as any).slowMovingThreshold || 60);
+      setHideBranding((settings as any).hideBranding === 1);
     }
+
   }, [settings]);
 
   const updateSettings = useMutation({
@@ -124,13 +135,25 @@ export default function Profile() {
 
   const handleSaveStore = (e: React.FormEvent) => {
     e.preventDefault();
-    updateSettings.mutate({ 
-      storeName, 
-      storeAddress, 
+    if (!storeName || !storePhone || !storeEmail) {
+      toast({
+        title: "Validasi Gagal",
+        description: "Nama Toko, Telepon, dan Email wajib diisi.",
+        variant: "destructive"
+      });
+      return;
+    }
+    updateSettings.mutate({
+      storeName,
+      storeAddress,
       storePhone,
+      storeEmail,
+      picName,
       fastMovingThreshold,
-      slowMovingThreshold
+      slowMovingThreshold,
+      hideBranding: hideBranding ? 1 : 0
     });
+
   };
 
   const handleChangePassword = (e: React.FormEvent) => {
@@ -298,19 +321,41 @@ export default function Profile() {
               <form onSubmit={handleSaveStore} className="flex-1 space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className="text-sm font-medium">Nama Toko</label>
+                    <label className="text-sm font-medium">Nama Toko <span className="text-red-500">*</span></label>
                     <Input
                       value={storeName}
                       onChange={(e) => setStoreName(e.target.value)}
                       placeholder="Contoh: Kazana Shop"
+                      required
                     />
                   </div>
                   <div className="space-y-1.5">
-                    <label className="text-sm font-medium">Telepon Toko</label>
+                    <label className="text-sm font-medium">Telepon Toko <span className="text-red-500">*</span></label>
                     <Input
                       value={storePhone}
                       onChange={(e) => setStorePhone(e.target.value)}
                       placeholder="0812-xxxx-xxxx"
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium">Email Toko <span className="text-red-500">*</span></label>
+                    <Input
+                      type="email"
+                      value={storeEmail}
+                      onChange={(e) => setStoreEmail(e.target.value)}
+                      placeholder="business@example.com"
+                      required
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="text-sm font-medium">Nama PIC / Owner</label>
+                    <Input
+                      value={picName}
+                      onChange={(e) => setPicName(e.target.value)}
+                      placeholder="Nama penanggung jawab"
                     />
                   </div>
                 </div>
@@ -356,6 +401,26 @@ export default function Profile() {
                     </div>
                   </div>
                 </div>
+
+                <div className="pt-4 border-t border-slate-100">
+                  <div className="flex items-center justify-between p-4 bg-slate-50 rounded-2xl border border-slate-100">
+                    <div className="space-y-0.5">
+                      <div className="flex items-center gap-2">
+                        <Label className="text-sm font-bold text-slate-800">Sembunyikan Branding Kazana</Label>
+                        {!((user?.subscribedModules && (user.subscribedModules as string[]).length > 0) || (user?.trialEndsAt && new Date(user.trialEndsAt) > new Date())) && (
+                          <Badge variant="outline" className="text-[9px] bg-amber-50 text-amber-700 border-amber-100 font-bold uppercase">Khusus Pro</Badge>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500">Hilangkan tulisan "Powered by Kazana POS" di bagian bawah struk.</p>
+                    </div>
+                    <Switch
+                      checked={hideBranding}
+                      onCheckedChange={setHideBranding}
+                      disabled={!((user?.subscribedModules && (user.subscribedModules as string[]).length > 0) || (user?.trialEndsAt && new Date(user.trialEndsAt) > new Date()))}
+                    />
+                  </div>
+                </div>
+
 
                 <div className="flex justify-end pt-4">
                   <Button type="submit" disabled={updateSettings.isPending}>

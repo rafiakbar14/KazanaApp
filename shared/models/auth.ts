@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, jsonb, pgTable, timestamp, varchar, integer } from "drizzle-orm/pg-core";
+import { index, jsonb, pgTable, timestamp, varchar, integer, serial } from "drizzle-orm/pg-core";
 
 export const sessions = pgTable(
   "sessions",
@@ -22,7 +22,10 @@ export const users = pgTable("users", {
   adminId: varchar("admin_id"),
   posPin: varchar("pos_pin"),
   googleId: varchar("google_id"),
+  phone: varchar("phone"),
+  isVerified: integer("is_verified").default(0).notNull(),
   subscribedModules: jsonb("subscribed_modules").default(['pos']),
+
   gDriveRemote: varchar("g_drive_remote"),
   trialEndsAt: timestamp("trial_ends_at"),
   branchId: integer("branch_id"),
@@ -30,6 +33,15 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
+
+export const otpCodes = pgTable("otp_codes", {
+  id: serial("id").primaryKey(),
+  emailOrPhone: varchar("email_or_phone").notNull(),
+  code: varchar("code").notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
 
 export type UpsertUser = typeof users.$inferInsert;
 export type User = typeof users.$inferSelect;
