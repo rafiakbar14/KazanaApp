@@ -61,6 +61,18 @@ export default function ReceiptPrinter({ sale, onClose }: ReceiptPrinterProps) {
             sale.items.forEach((item: any) => {
                 const itemName = item.product?.name || item.productName || "Produk";
                 message += `${itemName}\n${item.quantity} x ${formatCurrency(Number(item.unitPrice))}`;
+                
+                if (item.metadata) {
+                    try {
+                        const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata;
+                        if (metadata.modifiers) {
+                            metadata.modifiers.forEach((m: any) => {
+                                message += `\n  + ${m.name} (+${formatCurrency(Number(m.price))})`;
+                            });
+                        }
+                    } catch (e) {}
+                }
+                
                 if (item.discountAmount > 0) {
                     message += ` (Disc: -${formatCurrency(Number(item.discountAmount))})`;
                 }
@@ -274,6 +286,19 @@ export default function ReceiptPrinter({ sale, onClose }: ReceiptPrinterProps) {
                                         <span className="flex-1 mr-2">{item.product?.name || item.productName || "Produk"}</span>
                                         <span>{formatCurrency(Number(item.unitPrice) * item.quantity)}</span>
                                     </div>
+                                    {item.metadata && (() => {
+                                        try {
+                                            const metadata = typeof item.metadata === 'string' ? JSON.parse(item.metadata) : item.metadata;
+                                            if (metadata.modifiers) {
+                                                return metadata.modifiers.map((m: any, midx: number) => (
+                                                    <div key={midx} className="text-[9px] italic opacity-60 ml-2">
+                                                        + {m.name}
+                                                    </div>
+                                                ));
+                                            }
+                                        } catch (e) {}
+                                        return null;
+                                    })()}
                                     <div className="flex justify-between text-[10px] opacity-70">
                                         <span>{item.quantity} x {formatCurrency(Number(item.unitPrice))}</span>
                                         {item.discountAmount > 0 && (

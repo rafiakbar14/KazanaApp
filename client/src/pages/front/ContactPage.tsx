@@ -7,7 +7,10 @@ import { Textarea } from "@/components/ui/textarea";
 
 export default function ContactPage() {
   return (
-    <FrontLayout>
+    <FrontLayout 
+      title="Hubungi Kami" 
+      description="Punya pertanyaan atau butuh bantuan lebih lanjut tentang Kazana ERP? Tim support kami siap membantu operasional bisnis Anda 24/7."
+    >
       <section className="pt-40 pb-20 bg-white">
         <div className="max-w-[1300px] mx-auto px-6 grid lg:grid-cols-2 gap-16">
           <motion.div initial={{ opacity: 0, x: -30 }} animate={{ opacity: 1, x: 0 }}>

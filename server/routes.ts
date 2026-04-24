@@ -12,7 +12,7 @@ import * as XLSX from "xlsx";
 import ExcelJS from "exceljs";
 import { authStorage } from "./auth/storage";
 import archiver from "archiver";
-import { productPhotos, opnameRecordPhotos, users, userRoles, accounts, journalEntries, journalItems, posDevices, posRegistrationCodes, promotions, saleItems, sales, products, customers, opnameRecords, posPettyCash, inboundSessions, inboundItems, outboundSessions, outboundItems, opnameSessions } from "@shared/schema";
+import { productPhotos, opnameRecordPhotos, users, userRoles, accounts, journalEntries, journalItems, posDevices, posRegistrationCodes, promotions, saleItems, sales, products, customers, opnameRecords, posPettyCash, inboundSessions, inboundItems, outboundSessions, outboundItems, opnameSessions, insertAppointmentSchema, insertRestaurantTableSchema, insertOrderStatusLogSchema, insertProductModifierSchema } from "@shared/schema";
 import { db } from "./db";
 import { eq, desc, and, inArray, or, sql } from "drizzle-orm";
 import { storageService } from "./lib/storage-provider";
@@ -5361,6 +5361,135 @@ Tugas Anda:
     } catch (err: any) {
       console.error(">>> [GET /api/admin/petty-cash-report] ERROR:", err);
       res.status(500).json({ message: "Gagal mengambil laporan kas kecil" });
+    }
+  });
+
+  // === Business Verticals (Laundry, Restaurants, Barbershop) ===
+
+  // 1. Appointments (Barbershop, Clinic, etc.)
+  app.get("/api/appointments", isAuthenticated, async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const appointments = await storage.getAppointments(adminId);
+      res.json(appointments);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal mengambil data reservasi" });
+    }
+  });
+
+  app.post("/api/appointments", isAuthenticated, async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const input = insertAppointmentSchema.parse({ ...req.body, userId: adminId });
+      const appointment = await storage.createAppointment(input);
+      res.status(201).json(appointment);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
+      res.status(500).json({ message: "Gagal membuat reservasi" });
+    }
+  });
+
+  app.patch("/api/appointments/:id", isAuthenticated, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const appointment = await storage.updateAppointment(id, req.body);
+      res.json(appointment);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal memperbarui reservasi" });
+    }
+  });
+
+  app.delete("/api/appointments/:id", isAuthenticated, async (req, res) => {
+    try {
+      await storage.deleteAppointment(Number(req.params.id));
+      res.sendStatus(204);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal menghapus reservasi" });
+    }
+  });
+
+  // 2. Restaurant Tables
+  app.get("/api/tables", isAuthenticated, async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const tables = await storage.getRestaurantTables(adminId);
+      res.json(tables);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal mengambil data meja" });
+    }
+  });
+
+  app.post("/api/tables", isAuthenticated, requireRole("admin"), async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const input = insertRestaurantTableSchema.parse({ ...req.body, userId: adminId });
+      const table = await storage.createRestaurantTable(input);
+      res.status(201).json(table);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
+      res.status(500).json({ message: "Gagal membuat meja" });
+    }
+  });
+
+  app.patch("/api/tables/:id", isAuthenticated, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const table = await storage.updateRestaurantTable(id, req.body);
+      res.json(table);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal memperbarui status meja" });
+    }
+  });
+
+  // 3. Order Status Logs (Laundry Washing Steps)
+  app.get("/api/orders/:orderId/logs", isAuthenticated, async (req, res) => {
+    try {
+      const logs = await storage.getOrderStatusLogs(req.params.orderId);
+      res.json(logs);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal mengambil log status pesanan" });
+    }
+  });
+
+  app.post("/api/orders/:orderId/logs", isAuthenticated, async (req, res) => {
+    try {
+      const input = insertOrderStatusLogSchema.parse({ ...req.body, orderId: req.params.orderId });
+      const log = await storage.createOrderStatusLog(input);
+      res.status(201).json(log);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
+      res.status(500).json({ message: "Gagal mencatat status pesanan" });
+    }
+  });
+
+  // 4. Product Modifiers (POS Add-ons)
+  app.get("/api/products/:productId/modifiers", isAuthenticated, async (req, res) => {
+    try {
+      const modifiers = await storage.getProductModifiers(Number(req.params.productId));
+      res.json(modifiers);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal mengambil modifier produk" });
+    }
+  });
+
+  app.post("/api/products/:productId/modifiers", isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const input = insertProductModifierSchema.parse({ ...req.body, productId: Number(req.params.productId), userId: adminId });
+      const modifier = await storage.createProductModifier(input);
+      res.status(201).json(modifier);
+    } catch (err) {
+      if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
+      res.status(500).json({ message: "Gagal menambahkan modifier" });
+    }
+  });
+
+  app.delete("/api/modifiers/:id", isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
+    try {
+      await storage.deleteProductModifier(Number(req.params.id));
+      res.sendStatus(204);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal menghapus modifier" });
     }
   });
 

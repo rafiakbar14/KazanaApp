@@ -77,6 +77,16 @@ import FeaturesPage from "@/pages/front/FeaturesPage";
 import PricingPage from "@/pages/front/PricingPage";
 import BlogPage from "@/pages/front/BlogPage";
 import ContactPage from "@/pages/front/ContactPage";
+import PrivacyPolicy from "@/pages/front/PrivacyPolicy";
+import TermsConditions from "@/pages/front/TermsConditions";
+import AboutUs from "@/pages/front/AboutUs";
+import OurTeam from "@/pages/front/OurTeam";
+import PartnershipPage from "@/pages/front/PartnershipPage";
+import CareersPage from "@/pages/front/CareersPage";
+import HelpCenter from "@/pages/front/HelpCenter";
+import CaseStudiesPage from "@/pages/front/CaseStudiesPage";
+import EventsPromoPage from "@/pages/front/EventsPromoPage";
+import InvestorRelations from "@/pages/front/InvestorRelations";
 import { BackgroundUploadProvider } from "@/components/BackgroundUpload";
 
 import { POSProvider } from "@/hooks/use-pos";
@@ -978,9 +988,17 @@ function Router() {
         <Route path="/features" component={FeaturesPage} />
         <Route path="/pricing" component={PricingPage} />
         <Route path="/blog" component={BlogPage} />
-        <Route path="/mitra" component={ContactPage} />
-        <Route path="/karir" component={ContactPage} />
+        <Route path="/mitra" component={PartnershipPage} />
+        <Route path="/karir" component={CareersPage} />
         <Route path="/kontak" component={ContactPage} />
+        <Route path="/privacy" component={PrivacyPolicy} />
+        <Route path="/terms" component={TermsConditions} />
+        <Route path="/about" component={AboutUs} />
+        <Route path="/career" component={CareersPage} />
+        <Route path="/support" component={HelpCenter} />
+        <Route path="/investor" component={InvestorRelations} />
+        <Route path="/case-studies" component={CaseStudiesPage} />
+        <Route path="/events" component={EventsPromoPage} />
         
         <Route component={LandingPage} />
       </Switch>

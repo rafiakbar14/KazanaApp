@@ -32,7 +32,10 @@ const BLOG_POSTS = [
 
 export default function BlogPage() {
   return (
-    <FrontLayout>
+    <FrontLayout 
+      title="Blog & Wawasan" 
+      description="Dapatkan tips bisnis terbaru, inspirasi dari pengusaha sukses, dan pembaruan sistem Kazana ERP di sini."
+    >
       <section className="pt-40 pb-20 bg-white">
         <div className="max-w-[1300px] mx-auto px-6 text-center">
            <motion.h1 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-4xl lg:text-7xl font-black tracking-tighter text-slate-900 mb-8 pb-3">

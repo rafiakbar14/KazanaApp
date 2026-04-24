@@ -13,6 +13,7 @@ import {
   posSessions, posPettyCash, posPendingSales, vouchers, settings,
   tieredPricing, productBundles,
   categories, units, activityLogs, auditLogs, inventoryLots, customerLoyaltyLedger, otpCodes,
+  appointments, restaurantTables, orderStatusLogs, productModifiers,
 
   type Product, type InsertProduct,
   type OpnameSession, type InsertOpnameSession,
@@ -251,8 +252,25 @@ export interface IStorage {
   createSalesReturn(userId: string, returnData: any, items: any[]): Promise<any>;
   getSalesReturns(userId: string): Promise<any[]>;
 
+  // === Business Verticals (Laundry, Restaurants, Barbershop) ===
+  getAppointments(userId: string): Promise<Appointment[]>;
+  createAppointment(appointment: InsertAppointment): Promise<Appointment>;
+  updateAppointment(id: number, data: Partial<InsertAppointment>): Promise<Appointment>;
+  deleteAppointment(id: number): Promise<void>;
+
+  getRestaurantTables(userId: string): Promise<RestaurantTable[]>;
+  createRestaurantTable(table: InsertRestaurantTable): Promise<RestaurantTable>;
+  updateRestaurantTable(id: number, data: Partial<InsertRestaurantTable>): Promise<RestaurantTable>;
+  deleteRestaurantTable(id: number): Promise<void>;
+
+  getOrderStatusLogs(orderId: string): Promise<OrderStatusLog[]>;
+  createOrderStatusLog(log: InsertOrderStatusLog): Promise<OrderStatusLog>;
+
+  getProductModifiers(productId: number): Promise<ProductModifier[]>;
+  createProductModifier(modifier: InsertProductModifier): Promise<ProductModifier>;
+  deleteProductModifier(id: number): Promise<void>;
+
   // Activity Logs
-  getActivityLogs(adminId: string, branchId?: number): Promise<ActivityLog[]>;
   createActivityLog(log: InsertActivityLog): Promise<ActivityLog>;
   
   // === Stock Transfers ===
@@ -3435,6 +3453,64 @@ export class DatabaseStorage implements IStorage {
       entityId: log.entityId,
       details: log.details,
     }));
+  }
+  // === Business Verticals (Laundry, Restaurants, Barbershop) ===
+  async getAppointments(userId: string): Promise<Appointment[]> {
+    return await db.select().from(appointments).where(eq(appointments.userId, userId)).orderBy(desc(appointments.startTime));
+  }
+
+  async createAppointment(appointment: InsertAppointment): Promise<Appointment> {
+    const [result] = await db.insert(appointments).values(appointment).returning();
+    return result;
+  }
+
+  async updateAppointment(id: number, data: Partial<InsertAppointment>): Promise<Appointment> {
+    const [result] = await db.update(appointments).set(data).where(eq(appointments.id, id)).returning();
+    return result;
+  }
+
+  async deleteAppointment(id: number): Promise<void> {
+    await db.delete(appointments).where(eq(appointments.id, id));
+  }
+
+  async getRestaurantTables(userId: string): Promise<RestaurantTable[]> {
+    return await db.select().from(restaurantTables).where(eq(restaurantTables.userId, userId)).orderBy(restaurantTables.tableNumber);
+  }
+
+  async createRestaurantTable(table: InsertRestaurantTable): Promise<RestaurantTable> {
+    const [result] = await db.insert(restaurantTables).values(table).returning();
+    return result;
+  }
+
+  async updateRestaurantTable(id: number, data: Partial<InsertRestaurantTable>): Promise<RestaurantTable> {
+    const [result] = await db.update(restaurantTables).set(data).where(eq(restaurantTables.id, id)).returning();
+    return result;
+  }
+
+  async deleteRestaurantTable(id: number): Promise<void> {
+    await db.delete(restaurantTables).where(eq(restaurantTables.id, id));
+  }
+
+  async getOrderStatusLogs(orderId: string): Promise<OrderStatusLog[]> {
+    return await db.select().from(orderStatusLogs).where(eq(orderStatusLogs.orderId, orderId)).orderBy(desc(orderStatusLogs.createdAt));
+  }
+
+  async createOrderStatusLog(log: InsertOrderStatusLog): Promise<OrderStatusLog> {
+    const [result] = await db.insert(orderStatusLogs).values(log).returning();
+    return result;
+  }
+
+  async getProductModifiers(productId: number): Promise<ProductModifier[]> {
+    return await db.select().from(productModifiers).where(eq(productModifiers.productId, productId)).orderBy(productModifiers.name);
+  }
+
+  async createProductModifier(modifier: InsertProductModifier): Promise<ProductModifier> {
+    const [result] = await db.insert(productModifiers).values(modifier).returning();
+    return result;
+  }
+
+  async deleteProductModifier(id: number): Promise<void> {
+    await db.delete(productModifiers).where(eq(productModifiers.id, id));
   }
 }
 

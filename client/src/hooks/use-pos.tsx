@@ -7,6 +7,7 @@ import { useToast } from "@/hooks/use-toast";
 
 export interface CartItem extends Product {
     quantity: number;
+    selectedModifiers?: any[]; // Array of product_modifier
 }
 
 interface POSContextType {
@@ -59,6 +60,10 @@ interface POSContextType {
     categories: string[] | undefined;
     selectedCategory: string;
     setSelectedCategory: (cat: string) => void;
+    tables: any[] | undefined;
+    isLoadingTables: boolean;
+    selectedTableId: number | null;
+    setSelectedTableId: (id: number | null) => void;
 }
 
 const POSContext = createContext<POSContextType | null>(null);
@@ -69,6 +74,7 @@ export function POSProvider({ children }: { children: ReactNode }) {
     const [selectedCustomerId, setSelectedCustomerId] = useState<number | null>(null);
     const [pointsRedeemed, setPointsRedeemed] = useState<number>(0);
     const [paymentMethod, setPaymentMethod] = useState<string>("cash");
+    const [selectedTableId, setSelectedTableId] = useState<number | null>(null);
     const [isVerified, setIsVerified] = useState<boolean>(() => {
         try {
             return sessionStorage.getItem("pos_verified") === "true";
@@ -181,6 +187,11 @@ export function POSProvider({ children }: { children: ReactNode }) {
         queryKey: [api.pos.sales.list.path],
         enabled: isVerified,
     });
+    
+    const { data: tables, isLoading: isLoadingTables } = useQuery<any[]>({
+        queryKey: ["/api/tables"],
+        enabled: isVerified,
+    });
 
     const activePromos = useMemo(() => {
         if (!promotions) return [];
@@ -201,15 +212,18 @@ export function POSProvider({ children }: { children: ReactNode }) {
 
     const addToCart = useCallback((product: Product, qty: number = 1) => {
         setCart(prev => {
-            const existing = prev.find(item => item.id === product.id);
+            const existing = prev.find(item => 
+                item.id === product.id && 
+                JSON.stringify(item.selectedModifiers) === JSON.stringify((product as any).selectedModifiers)
+            );
             if (existing) {
                 return prev.map(item =>
-                    item.id === product.id
+                    (item.id === product.id && JSON.stringify(item.selectedModifiers) === JSON.stringify((product as any).selectedModifiers))
                         ? { ...item, quantity: item.quantity + qty }
                         : item
                 );
             }
-            return [...prev, { ...product, quantity: qty }];
+            return [...prev, { ...product, quantity: qty, selectedModifiers: (product as any).selectedModifiers || [] }];
         });
     }, []);
 
@@ -229,9 +243,9 @@ export function POSProvider({ children }: { children: ReactNode }) {
 
     const clearCart = useCallback(() => {
         setCart([]);
-        setSelectedCustomerId(null);
         setAppliedVoucher(null);
         setPointsRedeemed(0);
+        setSelectedTableId(null);
     }, []);
 
     const [appliedVoucher, setAppliedVoucher] = useState<any>(null);
@@ -275,12 +289,21 @@ export function POSProvider({ children }: { children: ReactNode }) {
                 itemDiscount = basePrice; 
             }
 
+            // Modifier Costs
+            let modifierTotal = 0;
+            if (item.selectedModifiers) {
+                item.selectedModifiers.forEach((m: any) => {
+                    modifierTotal += Number(m.price || 0);
+                });
+            }
+
             // Calculation
-            const subtotal = (basePrice - itemDiscount) * item.quantity;
-            itemsSubtotal += basePrice * item.quantity;
+            const itemPriceNormal = basePrice + modifierTotal;
+            const subtotal = (itemPriceNormal - itemDiscount) * item.quantity;
+            itemsSubtotal += itemPriceNormal * item.quantity;
             itemsDiscount += itemDiscount * item.quantity;
 
-            return { ...item, basePrice, itemDiscount, appliedPromoId };
+            return { ...item, basePrice, sellingPrice: itemPriceNormal, itemDiscount, appliedPromoId };
         });
 
         const subtotalAfterItems = Math.max(0, itemsSubtotal - itemsDiscount);
@@ -548,9 +571,10 @@ export function POSProvider({ children }: { children: ReactNode }) {
             quantity: item.quantity,
             unitPrice: item.sellingPrice,
             discountAmount: item.itemDiscount,
-            appliedPromotionId: item.appliedPromoId
+            appliedPromotionId: item.appliedPromoId,
+            metadata: item.selectedModifiers ? JSON.stringify({ modifiers: item.selectedModifiers }) : null
         }))
-    }), [createSaleMutation, totals, paymentMethod, currentCashier, appliedVoucher]);
+    }), [createSaleMutation, totals, paymentMethod, currentCashier, appliedVoucher, selectedTableId]);
 
     const createCustomer = useCallback((customer: InsertCustomer) => createCustomerMutation.mutate(customer), [createCustomerMutation]);
     const verifyPin = useCallback((pin: string, userId?: string) => verifyPinMutation.mutateAsync({ pin, userId }), [verifyPinMutation]);
@@ -609,7 +633,11 @@ export function POSProvider({ children }: { children: ReactNode }) {
         targetCashier,
         setTargetCashier,
         cashiers,
-        isLoadingCashiers
+        isLoadingCashiers,
+        tables,
+        isLoadingTables,
+        selectedTableId,
+        setSelectedTableId
     }), [
         cart, totals, customers, isLoadingCustomers, selectedCustomerId, pointsRedeemed,
         paymentMethod, isVerified, currentCashier, checkout, createSaleMutation.isPending,
@@ -617,7 +645,8 @@ export function POSProvider({ children }: { children: ReactNode }) {
         deviceId, currentDevice, registerDevice, registerDeviceMutation.isPending, isLoadingDevice, 
         activeSession, isLoadingSession, startSession, closeSession, createPettyCash, pendingSales, 
         holdSale, resumePendingSale, validateVoucher, appliedVoucher, lastSale, salesHistory, 
-        isLoadingHistory, categories, selectedCategory, targetCashier, cashiers, isLoadingCashiers
+        isLoadingHistory, categories, selectedCategory, targetCashier, cashiers, isLoadingCashiers,
+        tables, isLoadingTables, selectedTableId
     ]);
 
     return <POSContext.Provider value={value}>{children}</POSContext.Provider>;

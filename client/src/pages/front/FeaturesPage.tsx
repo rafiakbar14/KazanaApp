@@ -34,7 +34,10 @@ export default function FeaturesPage() {
   ];
 
   return (
-    <FrontLayout>
+    <FrontLayout 
+      title="Fitur Unggulan" 
+      description="Jelajahi berbagai fitur Enterprise Resource Planning (ERP) masa depan, mulai dari manajemen inventori hingga integrasi AI."
+    >
       <section className="pt-40 pb-20 bg-white">
         <div className="max-w-[1300px] mx-auto px-6 text-center">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>

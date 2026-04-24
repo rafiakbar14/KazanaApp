@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useProducts } from "@/hooks/use-products";
 import { usePOS } from "@/hooks/use-pos";
 import POSLayout from "./POSLayout";
-import { Search, Plus, Minus, Trash2, ShoppingCart, User, CreditCard, Banknote, QrCode, Package, ArrowLeft, Lock, X, CheckCircle2, ShoppingBag, UserPlus, Loader2, Tag, Settings2, Clock, Ticket, Store, History, Timer, AlertCircle, Printer, Monitor, Calendar, Coins, XCircle, Usb, Bluetooth, Wifi, ChevronRight, TrendingUp, TrendingDown } from "lucide-react";
+import { Search, Plus, Minus, Trash2, ShoppingCart, User, CreditCard, Banknote, QrCode, Package, ArrowLeft, Lock, X, CheckCircle2, ShoppingBag, UserPlus, Loader2, Tag, Settings2, Clock, Ticket, Store, History, Timer, AlertCircle, Printer, Monitor, Calendar, Coins, XCircle, Usb, Bluetooth, Wifi, ChevronRight, TrendingUp, TrendingDown, UtensilsCrossed } from "lucide-react";
 import { Link } from "wouter";
 import ReceiptPrinter from "@/components/ReceiptPrinter";
 import SessionPrinter from "@/components/SessionPrinter";
@@ -46,6 +46,8 @@ export default function POS() {
     const [isHistoryOpen, setIsHistoryOpen] = useState(false);
     const [voucherCode, setVoucherCode] = useState("");
     const [activeMobileTab, setActiveMobileTab] = useState<"catalog" | "cart" | "history">("catalog");
+    const [modifierTargetProduct, setModifierTargetProduct] = useState<any>(null);
+    const [selectedModifiers, setSelectedModifiers] = useState<any[]>([]);
 
     // New Customer Form
     const [newCustomer, setNewCustomer] = useState({ name: "", phone: "" });
@@ -78,9 +80,25 @@ export default function POS() {
     }, []);
 
     const handleCheckout = useCallback(() => {
-        pos.checkout();
+        pos.checkout({ tableId: pos.selectedTableId });
         setIsCheckoutOpen(false);
     }, [pos]);
+
+    const handleProductClick = async (product: any) => {
+        try {
+            const res = await fetch(`/api/products/${product.id}/modifiers`);
+            const modifiers = await res.json();
+            
+            if (modifiers && modifiers.length > 0) {
+                setModifierTargetProduct({ ...product, availableModifiers: modifiers });
+                setSelectedModifiers([]);
+            } else {
+                pos.addToCart(product);
+            }
+        } catch (err) {
+            pos.addToCart(product);
+        }
+    };
 
     useEffect(() => {
 
@@ -346,7 +364,7 @@ export default function POS() {
                                         <ProductCard
                                             key={product.id}
                                             product={product}
-                                            onAdd={() => pos.addToCart(product)}
+                                            onAdd={() => handleProductClick(product)}
                                             formatCurrency={formatCurrency}
                                         />
                                     ))}
@@ -456,7 +474,34 @@ export default function POS() {
                             </div>
 
                             {/* Adjustment Buttons Grid */}
-                            <div className="grid grid-cols-3 gap-3">
+                            <div className="grid grid-cols-4 gap-3">
+                                <Dialog>
+                                    <DialogTrigger asChild>
+                                        <Button variant="outline" className={cn("h-12 rounded-2xl flex flex-col items-center justify-center gap-0.5 border-slate-200 bg-slate-50 hover:bg-white/10 transition-all shadow-sm", pos.selectedTableId && "bg-blue-600/10 border-blue-600/50 text-blue-600")}>
+                                            <UtensilsCrossed className="w-4 h-4" />
+                                            <span className="text-[9px] font-black uppercase tracking-tighter">Meja</span>
+                                        </Button>
+                                    </DialogTrigger>
+                                    <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-md rounded-[2rem] p-6 shadow-3xl">
+                                        <DialogHeader><DialogTitle className="text-blue-900 font-black">Pilih Meja Restoran</DialogTitle></DialogHeader>
+                                        <div className="grid grid-cols-3 gap-3 py-6">
+                                            {pos.tables?.map((t: any) => (
+                                                <button
+                                                    key={t.id}
+                                                    onClick={() => pos.setSelectedTableId(t.id)}
+                                                    className={cn(
+                                                        "h-20 rounded-2xl border-2 flex flex-col items-center justify-center gap-1 transition-all",
+                                                        pos.selectedTableId === t.id ? "bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-500/20" : "bg-slate-50 border-slate-100 text-slate-500"
+                                                    )}
+                                                >
+                                                    <span className="text-lg font-black">{t.name}</span>
+                                                    <span className="text-[8px] font-bold uppercase">{t.status}</span>
+                                                </button>
+                                            ))}
+                                        </div>
+                                    </DialogContent>
+                                </Dialog>
+
                                 <Dialog open={isVoucherOpen} onOpenChange={setIsVoucherOpen}>
                                     <DialogTrigger asChild>
                                         <Button variant="outline" className={cn("h-12 rounded-2xl flex flex-col items-center justify-center gap-0.5 border-slate-200 bg-slate-50 hover:bg-white/10 transition-all shadow-sm", pos.appliedVoucher && "bg-blue-500/10 border-blue-500/50 text-blue-400")}>
@@ -609,6 +654,47 @@ export default function POS() {
                 </div>
 
                 <PettyCashDialog open={isPettyCashOpen} onOpenChange={setIsPettyCashOpen} onSave={pos.createPettyCash} />
+
+                <Dialog open={!!modifierTargetProduct} onOpenChange={(o) => { if(!o) setModifierTargetProduct(null); }}>
+                    <DialogContent className="bg-white text-slate-900 border-slate-200 rounded-[2.5rem] max-w-md p-8 shadow-3xl">
+                        <DialogHeader>
+                            <DialogTitle className="text-blue-900 font-black text-xl uppercase tracking-tighter">Pilih Ekstra / Modifier</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-3 py-6">
+                            {modifierTargetProduct?.availableModifiers?.map((m: any) => (
+                                <button
+                                    key={m.id}
+                                    onClick={() => {
+                                        setSelectedModifiers(prev => 
+                                            prev.find(p => p.id === m.id) 
+                                                ? prev.filter(p => p.id !== m.id)
+                                                : [...prev, m]
+                                        );
+                                    }}
+                                    className={cn(
+                                        "w-full p-4 rounded-2xl border-2 flex justify-between items-center transition-all",
+                                        selectedModifiers.find(p => p.id === m.id) ? "bg-blue-50 border-blue-600/50" : "bg-slate-50 border-transparent"
+                                    )}
+                                >
+                                    <div className="text-left">
+                                        <p className="font-bold text-sm text-slate-800">{m.name}</p>
+                                        <p className="text-[10px] text-blue-600 font-black">+{formatCurrency(m.price)}</p>
+                                    </div>
+                                    {selectedModifiers.find(p => p.id === m.id) && <CheckCircle2 className="w-5 h-5 text-blue-600" />}
+                                </button>
+                            ))}
+                        </div>
+                        <Button 
+                            className="w-full h-16 rounded-2xl bg-blue-600 text-white font-black text-lg shadow-xl shadow-blue-600/20"
+                            onClick={() => {
+                                pos.addToCart({ ...modifierTargetProduct, selectedModifiers } as any);
+                                setModifierTargetProduct(null);
+                            }}
+                        >
+                            TAMBAH KE KERANJANG
+                        </Button>
+                    </DialogContent>
+                </Dialog>
                 <PendingSalesDialog open={isPendingSalesOpen} onOpenChange={setIsPendingSalesOpen} sales={pos.pendingSales || []} onResume={pos.resumePendingSale} />
                 <SalesHistoryDialog open={isHistoryOpen} onOpenChange={setIsHistoryOpen} sales={pos.salesHistory || []} isLoading={pos.isLoadingHistory} formatCurrency={formatCurrency} onPrint={pos.setLastSale} />
                 <ClosingSessionDialog open={isClosingDialogOpen} onOpenChange={setIsClosingDialogOpen} session={pos.activeSession} onClosing={pos.closeSession} onPrint={() => setIsSessionPrinterOpen(true)} />
@@ -1232,6 +1318,15 @@ function CartItemCard({ item, onUpdate, onRemove, formatCurrency }: { item: any,
                     <div className="min-w-0">
                         <p className="font-bold text-sm lg:text-[15px] leading-tight text-slate-900/90 truncate pr-4">{item.name}</p>
                         <p className="text-[10px] font-mono text-slate-900/30 tracking-tight">{item.sku}</p>
+                        {item.selectedModifiers && item.selectedModifiers.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                                {item.selectedModifiers.map((m: any) => (
+                                    <Badge key={m.id} variant="secondary" className="text-[8px] py-0 h-4 bg-blue-50 text-blue-600 border-none font-bold">
+                                        +{m.name}
+                                    </Badge>
+                                ))}
+                            </div>
+                        )}
                     </div>
                     <button onClick={() => onRemove(item.id)} className="w-8 h-8 flex items-center justify-center text-slate-900/10 hover:text-red-400 hover:bg-red-500/10 rounded-xl transition-all absolute top-2 right-2">
                         <Trash2 className="w-4 h-4" />

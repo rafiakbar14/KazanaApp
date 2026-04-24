@@ -145,6 +145,7 @@ export const staffMembers = pgTable("staff_members", {
   locationType: text("location_type", { enum: ["toko", "gudang"] }).default("toko"),
   userId: text("user_id").notNull(),
   active: integer("active").default(1).notNull(),
+  commissionRate: decimal("commission_rate").default(0), // Persentase komisi (0-100)
 });
 
 export const announcements = pgTable("announcements", {
@@ -636,6 +637,70 @@ export const salesReturnItems = pgTable("sales_return_items", {
   quantityReturned: integer("quantity_returned").notNull(),
   restockStatus: text("restock_status", { enum: ["pending", "restocked", "disposed"] }).default("pending").notNull(),
 });
+
+// === Business Verticals (Laundry, Restaurants, Barbershop) ===
+
+export const appointments = pgTable("appointments", {
+  id: serial("id").primaryKey(),
+  customerId: integer("customer_id").references(() => customers.id),
+  staffId: integer("staff_id").references(() => staffMembers.id), // Stylist / Service Provider
+  storeId: text("store_id").notNull(),
+  branchId: integer("branch_id").references(() => branches.id),
+  title: text("title").notNull(),
+  startTime: timestamp("start_time").notNull(),
+  endTime: timestamp("end_time").notNull(),
+  status: text("status", { enum: ["pending", "confirmed", "completed", "cancelled"] }).default("pending").notNull(),
+  notes: text("notes"),
+  userId: text("user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const restaurantTables = pgTable("restaurant_tables", {
+  id: serial("id").primaryKey(),
+  storeId: text("store_id").notNull(),
+  branchId: integer("branch_id").references(() => branches.id),
+  tableNumber: text("table_number").notNull(),
+  capacity: integer("capacity").default(2),
+  status: text("status", { enum: ["available", "occupied", "reserved", "cleaning"] }).default("available").notNull(),
+  userId: text("user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const orderStatusLogs = pgTable("order_status_logs", {
+  id: serial("id").primaryKey(),
+  orderId: text("order_id").notNull(), // Unified order ID for Laundry / Sales
+  statusName: text("status_name").notNull(), // misal: 'Wash', 'Dry', 'Iron', 'Ready'
+  notes: text("notes"),
+  createdBy: text("created_by"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+export const productModifiers = pgTable("product_modifiers", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
+  name: text("name").notNull(),
+  price: decimal("price").default(0).notNull(),
+  type: text("type", { enum: ["extra", "option"] }).default("extra").notNull(),
+  isAvailable: integer("is_available").default(1).notNull(),
+  userId: text("user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});
+
+// === Schema Insert Definitions ===
+
+export const insertAppointmentSchema = createInsertSchema(appointments).omit({ id: true, createdAt: true });
+export const insertRestaurantTableSchema = createInsertSchema(restaurantTables).omit({ id: true, createdAt: true });
+export const insertOrderStatusLogSchema = createInsertSchema(orderStatusLogs).omit({ id: true, createdAt: true });
+export const insertProductModifierSchema = createInsertSchema(productModifiers).omit({ id: true, createdAt: true });
+
+export type Appointment = typeof appointments.$inferSelect;
+export type InsertAppointment = z.infer<typeof insertAppointmentSchema>;
+export type RestaurantTable = typeof restaurantTables.$inferSelect;
+export type InsertRestaurantTable = z.infer<typeof insertRestaurantTableSchema>;
+export type OrderStatusLog = typeof orderStatusLogs.$inferSelect;
+export type InsertOrderStatusLog = z.infer<typeof insertOrderStatusLogSchema>;
+export type ProductModifier = typeof productModifiers.$inferSelect;
+export type InsertProductModifier = z.infer<typeof insertProductModifierSchema>;
 
 // === Relations ===
 

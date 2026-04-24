@@ -93,9 +93,11 @@ export default function BusinessSolutionPage() {
   const Icon = data.icon;
 
   return (
-    <FrontLayout>
-      {/* Hero */}
-      <section className="pt-40 pb-20 bg-white">
+    <FrontLayout 
+      title={`Solusi ERP untuk ${data.title}`} 
+      description={`Tingkatkan efisiensi dan profitabilitas bisnis ${data.title} Anda dengan solusi ERP modular dari Kazana.`}
+    >
+      <section className="pt-40 lg:pt-52 pb-20 bg-white overflow-hidden">
         <div className="max-w-[1300px] mx-auto px-6 grid lg:grid-cols-2 gap-16 items-center">
           <motion.div 
             initial={{ opacity: 0, x: -30 }} 
@@ -144,12 +146,12 @@ export default function BusinessSolutionPage() {
       </section>
 
       {/* Agitation */}
-      <section className="py-20 bg-slate-950 text-white">
+      <section className="py-20 bg-[#020617] text-white">
         <div className="max-w-4xl mx-auto px-6 text-center">
-          <h2 className="text-3xl md:text-5xl font-black mb-8 italic tracking-tight leading-tight">
+          <h2 className="text-3xl md:text-5xl font-black mb-8 italic tracking-tight leading-tight text-white/90">
              "{data.agitation}"
           </h2>
-          <div className="h-1 w-20 bg-blue-500 mx-auto" />
+          <div className="h-1 w-20 bg-[#0044CC] mx-auto" />
         </div>
       </section>
 
