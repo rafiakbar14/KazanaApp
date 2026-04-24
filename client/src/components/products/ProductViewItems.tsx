@@ -73,8 +73,8 @@ export const ProductRow = memo(({
   return (
     <>
     <tr className={cn(
-      "hover:bg-muted/20 transition-colors group",
-      isExpanded && "bg-primary/[0.02]"
+      "hover:bg-muted/20 transition-all duration-300 group premium-table-row border-b border-border/30",
+      isExpanded && "bg-primary/[0.02] shadow-inner"
     )} data-testid={`row-product-${product.id}`}>
       {canManageSku && (
         <td className="px-4 py-3">
@@ -157,7 +157,7 @@ export const ProductRow = memo(({
       </td>
       <td className="px-4 py-3 text-right">
         <div className="flex flex-col items-end gap-1">
-          <span className={product.currentStock <= (product.minStock || 0) ? "text-red-600 font-black flex items-center justify-end gap-1" : "text-foreground font-bold"}>
+          <span className={product.currentStock <= (product.minStock || 0) ? "text-red-600 font-black flex items-center justify-end gap-1 px-2 py-0.5 bg-red-50 rounded-full" : "text-foreground font-bold"}>
             {product.currentStock <= (product.minStock || 0) && <AlertTriangle className="w-3 h-3" />}
             {product.currentStock.toLocaleString("id-ID")}
           </span>

@@ -24,6 +24,13 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { generateBusinessInsights, generateProductionAdvice } from "./ai";
 import crypto from "crypto";
 
+const VALID_MODULES = [
+  { id: "inventory", price: 0 },
+  { id: "pos", price: 150000 },
+  { id: "accounting", price: 350000 },
+  { id: "production", price: 250000 },
+];
+
 
 const upload = multer({ dest: path.join(os.tmpdir(), "kazana-uploads"), limits: { fileSize: 50 * 1024 * 1024 } });
 
@@ -70,6 +77,47 @@ function requireRole(...roles: string[]) {
       return next();
     }
     res.status(403).json({ message: "Anda tidak memiliki akses untuk fitur ini" });
+  };
+}
+
+function requireModule(moduleName: string) {
+  return async (req: Request, res: Response, next: Function) => {
+    const userId = getUserId(req);
+    if (!userId) return res.status(401).json({ message: "Unauthorized" });
+
+    const user = await authStorage.getUser(userId);
+    if (!user) return res.status(401).json({ message: "User not found" });
+
+    // Super Admins always have access
+    if (user.isSuperAdmin === 1) return next();
+
+    let subscribedModules = (user.subscribedModules as string[]) || [];
+
+    // Inherit from team admin if sub-user
+    if (user.adminId) {
+      const teamAdmin = await authStorage.getUser(user.adminId);
+      if (teamAdmin) {
+        subscribedModules = (teamAdmin.subscribedModules as string[]) || [];
+      }
+    }
+
+    // Check trial
+    const isTrialActive = user.trialEndsAt && new Date(user.trialEndsAt) > new Date();
+    if (isTrialActive) {
+      // Trial unlocks pos, accounting, production
+      if (["pos", "accounting", "production", "inventory"].includes(moduleName)) return next();
+    }
+
+    if (moduleName === "inventory") return next(); // Base module always free
+
+    if (subscribedModules.includes(moduleName)) {
+      return next();
+    }
+
+    res.status(403).json({ 
+      message: `Modul ${moduleName} belum aktif. Silakan aktifkan modul ini di halaman Langganan.`,
+      moduleRequired: moduleName
+    });
   };
 }
 
@@ -348,12 +396,12 @@ export async function registerRoutes(
     try {
       const id = Number(req.params.id);
       const adminId = await getTeamAdminId(req);
-      const existing = await storage.getProduct(id);
-      if (!existing || existing.userId !== adminId) {
+      const existing = await storage.getProduct(id, adminId);
+      if (!existing) {
         return res.status(404).json({ message: "Product not found" });
       }
       const input = api.products.update.input.parse(req.body);
-      const product = await storage.updateProduct(id, input);
+      const product = await storage.updateProduct(id, adminId, input);
       res.json(product);
     } catch (err) {
       res.status(500).json({ message: "Failed to update product" });
@@ -361,13 +409,13 @@ export async function registerRoutes(
   });
 
   app.delete(api.products.delete.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
-    const adminId = await getTeamAdminId(req);
-    const existing = await storage.getProduct(Number(req.params.id));
-    if (!existing || existing.userId !== adminId) {
-      return res.status(404).json({ message: "Product not found" });
+    try {
+      const adminId = await getTeamAdminId(req);
+      await storage.deleteProduct(Number(req.params.id), adminId);
+      res.sendStatus(204);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to delete product" });
     }
-    await storage.deleteProduct(Number(req.params.id));
-    res.sendStatus(204);
   });
 
   app.post(api.products.bulkDelete.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
@@ -403,7 +451,8 @@ export async function registerRoutes(
   // === Product Photos (multi-photo support) ===
   app.get(api.productPhotos.list.path, isAuthenticated, async (req, res) => {
     const productId = Number(req.params.productId);
-    const photos = await storage.getProductPhotos(productId);
+    const adminId = await getTeamAdminId(req);
+    const photos = await storage.getProductPhotos(productId, adminId);
     res.json(photos);
   });
 
@@ -411,8 +460,9 @@ export async function registerRoutes(
     try {
       const productId = Number(req.params.productId);
       const adminId = await getTeamAdminId(req);
-      const product = await storage.getProduct(productId);
-      if (!product || product.userId !== adminId) {
+      
+      const product = await storage.getProduct(productId, adminId);
+      if (!product) {
         return res.status(404).json({ message: "Product not found" });
       }
 
@@ -421,7 +471,7 @@ export async function registerRoutes(
       }
 
       const url = await uploadToObjectStorage(req.file);
-      const photo = await storage.addProductPhoto({ productId, url });
+      const photo = await storage.addProductPhoto({ productId, url }, adminId);
 
       res.status(201).json(photo);
     } catch (err) {
@@ -433,14 +483,8 @@ export async function registerRoutes(
   app.delete(api.productPhotos.delete.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
     try {
       const photoId = Number(req.params.photoId);
-      const productId = Number(req.params.productId);
       const adminId = await getTeamAdminId(req);
-      const product = await storage.getProduct(productId);
-      if (!product || product.userId !== adminId) {
-        return res.status(404).json({ message: "Product not found" });
-      }
-
-      await storage.deleteProductPhoto(photoId);
+      await storage.deleteProductPhoto(photoId, adminId);
       res.sendStatus(204);
     } catch (err) {
       console.error("Delete photo error:", err);
@@ -451,7 +495,8 @@ export async function registerRoutes(
   // === Product Units (unit beranak) ===
   app.get(api.productUnits.list.path, isAuthenticated, async (req, res) => {
     const productId = Number(req.params.productId);
-    const units = await storage.getProductUnits(productId);
+    const adminId = await getTeamAdminId(req);
+    const units = await storage.getProductUnits(productId, adminId);
     res.json(units);
   });
 
@@ -459,8 +504,8 @@ export async function registerRoutes(
     try {
       const productId = Number(req.params.productId);
       const adminId = await getTeamAdminId(req);
-      const product = await storage.getProduct(productId);
-      if (!product || product.userId !== adminId) {
+      const product = await storage.getProduct(productId, adminId);
+      if (!product) {
         return res.status(404).json({ message: "Product not found" });
       }
 
@@ -475,7 +520,7 @@ export async function registerRoutes(
         conversionToBase: conversionToBase || 1,
         baseUnit,
         sortOrder: sortOrder || 0,
-      });
+      }, adminId);
       res.status(201).json(unit);
     } catch (err) {
       console.error("Create unit error:", err);
@@ -485,16 +530,10 @@ export async function registerRoutes(
 
   app.put(api.productUnits.update.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
     try {
-      const productId = Number(req.params.productId);
       const unitId = Number(req.params.unitId);
       const adminId = await getTeamAdminId(req);
-      const product = await storage.getProduct(productId);
-      if (!product || product.userId !== adminId) {
-        return res.status(404).json({ message: "Product not found" });
-      }
-
       const { unitName, conversionToBase, baseUnit, sortOrder } = req.body;
-      const unit = await storage.updateProductUnit(unitId, {
+      const unit = await storage.updateProductUnit(unitId, adminId, {
         unitName,
         conversionToBase,
         baseUnit,
@@ -512,12 +551,7 @@ export async function registerRoutes(
       const productId = Number(req.params.productId);
       const unitId = Number(req.params.unitId);
       const adminId = await getTeamAdminId(req);
-      const product = await storage.getProduct(productId);
-      if (!product || product.userId !== adminId) {
-        return res.status(404).json({ message: "Product not found" });
-      }
-
-      await storage.deleteProductUnit(unitId);
+      await storage.deleteProductUnit(unitId, adminId);
       res.sendStatus(204);
     } catch (err) {
       console.error("Delete unit error:", err);
@@ -530,8 +564,8 @@ export async function registerRoutes(
     try {
       const productId = Number(req.params.productId);
       const adminId = await getTeamAdminId(req);
-      const product = await storage.getProduct(productId);
-      if (!product || product.userId !== adminId) {
+      const product = await storage.getProduct(productId, adminId);
+      if (!product) {
         return res.status(404).json({ message: "Product not found" });
       }
 
@@ -540,7 +574,7 @@ export async function registerRoutes(
       }
 
       const url = await uploadToObjectStorage(req.file);
-      await storage.updateProduct(productId, { photoUrl: url });
+      await storage.updateProduct(productId, adminId, { photoUrl: url });
       res.json({ url });
     } catch (err) {
       console.error("Upload error:", err);
@@ -569,13 +603,13 @@ export async function registerRoutes(
       const productId = Number(req.params.productId);
       const adminId = await getTeamAdminId(req);
 
-      const session = await storage.getSession(sessionId);
-      if (!session || session.userId !== adminId) {
+      const session = await storage.getSession(sessionId, adminId);
+      if (!session) {
         return res.status(404).json({ message: "Session not found" });
       }
 
-      const product = await storage.getProduct(productId);
-      if (!product || product.userId !== adminId) {
+      const product = await storage.getProduct(productId, adminId);
+      if (!product) {
         return res.status(404).json({ message: "Product not found" });
       }
 
@@ -599,13 +633,13 @@ export async function registerRoutes(
       const productId = Number(req.params.productId);
       const adminId = await getTeamAdminId(req);
 
-      const session = await storage.getSession(sessionId);
-      if (!session || session.userId !== adminId) {
+      const session = await storage.getSession(sessionId, adminId);
+      if (!session) {
         return res.status(404).json({ message: "Session not found" });
       }
 
-      const product = await storage.getProduct(productId);
-      if (!product || product.userId !== adminId) {
+      const product = await storage.getProduct(productId, adminId);
+      if (!product) {
         return res.status(404).json({ message: "Product not found" });
       }
 
@@ -619,10 +653,10 @@ export async function registerRoutes(
 
       if (record) {
         const recordPhoto = await storage.addRecordPhoto({ recordId: record.id, url });
-        await storage.updateRecordPhoto(sessionId, productId, url);
+        await storage.updateRecordPhoto(sessionId, adminId, productId, url);
         res.status(201).json(recordPhoto);
       } else {
-        await storage.updateRecordPhoto(sessionId, productId, url);
+        await storage.updateRecordPhoto(sessionId, adminId, productId, url);
         res.status(201).json({ url });
       }
     } catch (err) {
@@ -637,12 +671,7 @@ export async function registerRoutes(
       const photoId = Number(req.params.photoId);
       const adminId = await getTeamAdminId(req);
 
-      const session = await storage.getSession(sessionId);
-      if (!session || session.userId !== adminId) {
-        return res.status(404).json({ message: "Session not found" });
-      }
-
-      await storage.deleteRecordPhoto(photoId);
+      await storage.deleteRecordPhoto(photoId, adminId);
       res.sendStatus(204);
     } catch (err) {
       console.error("Delete record photo error:", err);
@@ -673,25 +702,6 @@ export async function registerRoutes(
     }
   });
 
-  app.delete(api.recordPhotos.delete.path, isAuthenticated, async (req, res) => {
-    try {
-      const sessionId = Number(req.params.sessionId);
-      const productId = Number(req.params.productId);
-      const photoId = Number(req.params.photoId);
-      const adminId = await getTeamAdminId(req);
-
-      const session = await storage.getSession(sessionId);
-      if (!session || session.userId !== adminId) {
-        return res.status(404).json({ message: "Session not found" });
-      }
-
-      await storage.deleteRecordPhoto(photoId);
-      res.sendStatus(204);
-    } catch (err) {
-      console.error("Delete record photo error:", err);
-      res.status(500).json({ message: "Failed to delete photo" });
-    }
-  });
 
   // === Download ZIP Photos ===
   app.post(api.upload.downloadZip.path, isAuthenticated, async (req, res) => {
@@ -699,8 +709,8 @@ export async function registerRoutes(
       const sessionId = Number(req.params.id);
       const adminId = await getTeamAdminId(req);
 
-      const session = await storage.getSession(sessionId);
-      if (!session || session.userId !== adminId) {
+      const session = await storage.getSession(sessionId, adminId);
+      if (!session) {
         return res.status(404).json({ message: "Session not found" });
       }
 
@@ -1014,8 +1024,6 @@ export async function registerRoutes(
       res.status(500).json({ message: "Gagal mengunggah foto" });
     }
   });
-
-  // === Staff Members ===
   app.get(api.staff.list.path, isAuthenticated, async (req, res) => {
     const adminId = await getTeamAdminId(req);
     const members = await storage.getStaffMembers(adminId);
@@ -1258,7 +1266,7 @@ export async function registerRoutes(
       if (!session || session.userId !== adminId) {
         return res.status(404).json({ message: "Session not found" });
       }
-      const updated = await storage.updateOutboundSignatures(id, input);
+      const updated = await storage.updateOutboundSignatures(id, adminId, input);
       res.json(updated);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -1269,7 +1277,8 @@ export async function registerRoutes(
 
   app.get(api.branches.list.path, isAuthenticated, async (req, res) => {
     try {
-      const branches = await storage.getBranches();
+      const adminId = await getTeamAdminId(req);
+      const branches = await storage.getBranches(adminId);
       res.json(branches);
     } catch (err) {
       res.status(500).json({ message: "Gagal mengambil daftar cabang" });
@@ -1314,7 +1323,8 @@ export async function registerRoutes(
       if (content !== undefined) updates.content = content;
       if (expiresAt !== undefined) updates.expiresAt = expiresAt ? new Date(expiresAt) : null;
       if (imageUrl !== undefined) updates.imageUrl = imageUrl;
-      const announcement = await storage.updateAnnouncement(id, updates as any);
+      const adminId = await getTeamAdminId(req);
+      const announcement = await storage.updateAnnouncement(id, adminId, updates as any);
       res.json(announcement);
     } catch (err) {
       console.error("Update announcement error:", err);
@@ -1331,7 +1341,8 @@ export async function registerRoutes(
       }
 
       const url = await uploadToObjectStorage(file);
-      const announcement = await storage.updateAnnouncement(id, { imageUrl: url });
+      const adminId = await getTeamAdminId(req);
+      const announcement = await storage.updateAnnouncement(id, adminId, { imageUrl: url });
       res.json(announcement);
     } catch (err) {
       console.error("Announcement image upload error:", err);
@@ -1341,7 +1352,8 @@ export async function registerRoutes(
 
   app.delete(api.announcements.delete.path, isAuthenticated, requireRole("admin"), async (req, res) => {
     try {
-      await storage.deleteAnnouncement(Number(req.params.id));
+      const adminId = await getTeamAdminId(req);
+      await storage.deleteAnnouncement(Number(req.params.id), adminId);
       res.sendStatus(204);
     } catch (err) {
       console.error("Delete announcement error:", err);
@@ -1349,8 +1361,8 @@ export async function registerRoutes(
     }
   });
 
-  // === Production (BOM & Assembly) ===
-  app.get(api.production.boms.list.path, isAuthenticated, async (req, res) => {
+  // Production Module - BOM
+  app.get(api.production.boms.list.path, isAuthenticated, requireModule("production"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const items = await storage.getBOMs(adminId);
@@ -1360,7 +1372,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post(api.production.boms.create.path, isAuthenticated, async (req, res) => {
+  app.post(api.production.boms.create.path, isAuthenticated, requireModule("production"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const input = api.production.boms.create.input.parse(req.body);
@@ -1375,7 +1387,8 @@ export async function registerRoutes(
   app.get(api.production.boms.get.path, isAuthenticated, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const item = await storage.getBOM(id);
+      const adminId = await getTeamAdminId(req);
+      const item = await storage.getBOM(id, adminId);
       if (!item) return res.status(404).json({ message: "BOM tidak ditemukan" });
       res.json(item);
     } catch (err) {
@@ -1387,7 +1400,8 @@ export async function registerRoutes(
     try {
       const bomId = Number(req.params.bomId);
       const input = api.production.boms.addItem.input.parse(req.body);
-      const item = await storage.addBOMItem({ ...input, bomId });
+      const adminId = await getTeamAdminId(req);
+      const item = await storage.addBOMItem({ ...input, bomId }, adminId);
       res.status(201).json(item);
     } catch (err) {
       if (err instanceof z.ZodError) return res.status(400).json({ message: err.errors[0].message });
@@ -1397,7 +1411,8 @@ export async function registerRoutes(
 
   app.delete(api.production.boms.removeItem.path, isAuthenticated, async (req, res) => {
     try {
-      await storage.removeBOMItem(Number(req.params.itemId));
+      const adminId = await getTeamAdminId(req);
+      await storage.removeBOMItem(Number(req.params.itemId), adminId);
       res.sendStatus(204);
     } catch (err) {
       res.status(500).json({ message: "Gagal menghapus item BOM" });
@@ -1414,7 +1429,7 @@ export async function registerRoutes(
     }
   });
 
-  app.post(api.production.sessions.create.path, isAuthenticated, async (req, res) => {
+  app.post(api.production.sessions.create.path, isAuthenticated, requireModule("production"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const input = api.production.sessions.create.input.parse(req.body);
@@ -1426,10 +1441,11 @@ export async function registerRoutes(
     }
   });
 
-  app.get(api.production.sessions.get.path, isAuthenticated, async (req, res) => {
+  app.get(api.production.sessions.get.path, isAuthenticated, requireModule("production"), async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const item = await storage.getAssemblySession(id);
+      const adminId = await getTeamAdminId(req);
+      const item = await storage.getAssemblySession(id, adminId);
       if (!item) return res.status(404).json({ message: "Sesi tidak ditemukan" });
       res.json(item);
     } catch (err) {
@@ -1437,10 +1453,11 @@ export async function registerRoutes(
     }
   });
 
-  app.post(api.production.sessions.complete.path, isAuthenticated, async (req, res) => {
+  app.post(api.production.sessions.complete.path, isAuthenticated, requireModule("production"), async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const session = await storage.completeAssemblySession(id);
+      const adminId = await getTeamAdminId(req);
+      const session = await storage.completeAssemblySession(id, adminId);
       res.json(session);
     } catch (err) {
       res.status(500).json({ message: err instanceof Error ? err.message : "Gagal memfinalisasi produksi" });
@@ -1453,7 +1470,7 @@ export async function registerRoutes(
 
 
 
-  app.post(api.production.predict.path, isAuthenticated, requireRole("admin", "production"), async (req, res) => {
+  app.post(api.production.predict.path, isAuthenticated, requireRole("admin", "production"), requireModule("production"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const demand = await storage.getInventoryDemand(adminId);
@@ -1527,7 +1544,7 @@ export async function registerRoutes(
         userId: adminId
       });
 
-      // Delete the code after use
+      // Default export of the router
       await storage.deleteRegistrationCode(input.registrationCode);
 
       res.status(201).json(device);
@@ -1818,9 +1835,10 @@ export async function registerRoutes(
   app.get(api.pos.sales.get.path, isAuthenticated, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      if (isNaN(id)) return; // Let next routes handle it (though technically this route shouldn't have matched if it's not a number, but express matches anything for :id)
+      if (isNaN(id)) return; 
 
-      const sale = await storage.getSale(id);
+      const adminId = await getTeamAdminId(req);
+      const sale = await storage.getSale(id, adminId);
       if (!sale) return res.status(404).json({ message: "Transaksi tidak ditemukan" });
       res.json(sale);
     } catch (err) {
@@ -1909,7 +1927,8 @@ export async function registerRoutes(
   app.post(api.pos.sales.returns.complete.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const salesReturn = await storage.completeSalesReturn(id);
+      const adminId = await getTeamAdminId(req);
+      const salesReturn = await storage.completeSalesReturn(id, adminId);
       res.json(salesReturn);
     } catch (err: any) {
       res.status(500).json({ message: "Gagal menyelesaikan retur penjualan", error: err.message });
@@ -1930,7 +1949,8 @@ export async function registerRoutes(
   app.get(api.transfers.get.path, isAuthenticated, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const transfer = await storage.getStockTransfer(id);
+      const adminId = await getTeamAdminId(req);
+      const transfer = await storage.getStockTransfer(id, adminId);
       if (!transfer) return res.status(404).json({ message: "Mutasi tidak ditemukan" });
       res.json(transfer);
     } catch (err) {
@@ -1959,8 +1979,9 @@ export async function registerRoutes(
   app.post(api.transfers.receive.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
     try {
       const id = Number(req.params.id);
+      const adminId = await getTeamAdminId(req);
       const { receivedBy } = req.body;
-      const transfer = await storage.completeStockTransfer(id, receivedBy || "Staff");
+      const transfer = await storage.completeStockTransfer(id, adminId, receivedBy || "Staff");
       res.json(transfer);
     } catch (err) {
       console.error("Receive Transfer Error:", err);
@@ -1995,7 +2016,8 @@ export async function registerRoutes(
   app.delete(api.pos.promotions.delete.path, isAuthenticated, requireRole("admin"), async (req, res) => {
     try {
       const id = Number(req.params.id);
-      await storage.deletePromotion(id);
+      const adminId = await getTeamAdminId(req);
+      await storage.deletePromotion(id, adminId);
       res.sendStatus(204);
     } catch (err) {
       res.status(500).json({ message: "Gagal menghapus promo" });
@@ -2045,7 +2067,8 @@ export async function registerRoutes(
     try {
       const id = parseInt(req.params.id as string);
       const { closingBalance, actualCash, notes } = req.body;
-      const session = await storage.closePOSSession(id, {
+      const userId = getUserId(req);
+      const session = await storage.closePOSSession(id, userId, {
         closingBalance: Number(closingBalance),
         actualCash: Number(actualCash),
         notes
@@ -2060,7 +2083,8 @@ export async function registerRoutes(
   app.get(api.pos.sessions.pettyCash.list.path, isAuthenticated, async (req, res) => {
     try {
       const sessionId = parseInt(req.params.id as string);
-      const items = await storage.getPettyCash(sessionId);
+      const userId = getUserId(req);
+      const items = await storage.getPettyCash(sessionId, userId);
       res.json(items);
     } catch (err) {
       res.status(500).json({ message: "Gagal mengambil data kas kecil" });
@@ -2099,7 +2123,8 @@ export async function registerRoutes(
   app.get(api.pos.sessions.pendingSales.list.path, isAuthenticated, async (req, res) => {
     try {
       const sessionId = parseInt(req.params.id as string);
-      const items = await storage.getPendingSales(sessionId);
+      const userId = getUserId(req);
+      const items = await storage.getPendingSales(sessionId, userId);
       res.json(items);
     } catch (err) {
       res.status(500).json({ message: "Gagal mengambil daftar pending sale" });
@@ -2109,11 +2134,12 @@ export async function registerRoutes(
   app.post(api.pos.pendingSales.save.path, isAuthenticated, async (req, res) => {
     try {
       const { sessionId, cartData, customerName } = req.body;
+      const userId = getUserId(req);
       const item = await storage.savePendingSale({
         sessionId,
         cartData,
         customerName
-      });
+      }, userId);
       res.json(item);
     } catch (err) {
       res.status(500).json({ message: "Gagal menyimpan pending sale" });
@@ -2122,7 +2148,8 @@ export async function registerRoutes(
 
   app.delete(api.pos.pendingSales.delete.path, isAuthenticated, async (req, res) => {
     try {
-      await storage.deletePendingSale(parseInt(req.params.id as string));
+      const userId = getUserId(req);
+      await storage.deletePendingSale(parseInt(req.params.id as string), userId);
       res.sendStatus(204);
     } catch (err) {
       res.status(500).json({ message: "Gagal menghapus pending sale" });
@@ -2174,7 +2201,8 @@ export async function registerRoutes(
 
   app.delete(api.pos.vouchers.delete.path, isAuthenticated, requireRole("admin"), async (req, res) => {
     try {
-      await storage.deleteVoucher(parseInt(req.params.id as string));
+      const userId = getUserId(req);
+      await storage.deleteVoucher(parseInt(req.params.id as string), userId);
       res.sendStatus(204);
     } catch (err) {
       res.status(500).json({ message: "Gagal menghapus voucher" });
@@ -3053,7 +3081,7 @@ Pastikan output hanya berisi JSON array tersebut agar bisa di-parse secara otoma
   });
 
   // === Accounting API ===
-  app.get(api.accounting.accounts.list.path, isAuthenticated, requireRole("admin"), async (req, res) => {
+  app.get(api.accounting.accounts.list.path, isAuthenticated, requireRole("admin"), requireModule("accounting"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const accounts = await storage.getAccounts(adminId);
@@ -3083,7 +3111,7 @@ Pastikan output hanya berisi JSON array tersebut agar bisa di-parse secara otoma
     }
   });
 
-  app.post(api.accounting.accounts.create.path, isAuthenticated, requireRole("admin"), async (req, res) => {
+  app.post(api.accounting.accounts.create.path, isAuthenticated, requireRole("admin"), requireModule("accounting"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const account = await storage.createAccount({ ...req.body, userId: adminId });
@@ -3093,7 +3121,7 @@ Pastikan output hanya berisi JSON array tersebut agar bisa di-parse secara otoma
     }
   });
 
-  app.get(api.accounting.journal.list.path, isAuthenticated, requireRole("admin"), async (req, res) => {
+  app.get(api.accounting.journal.list.path, isAuthenticated, requireRole("admin"), requireModule("accounting"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const branchId = req.query.branchId ? Number(req.query.branchId) : undefined;
@@ -3104,7 +3132,7 @@ Pastikan output hanya berisi JSON array tersebut agar bisa di-parse secara otoma
     }
   });
 
-  app.post(api.accounting.journal.create.path, isAuthenticated, requireRole("admin"), async (req, res) => {
+  app.post(api.accounting.journal.create.path, isAuthenticated, requireRole("admin"), requireModule("accounting"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const { description, reference, items } = req.body;
@@ -3118,7 +3146,7 @@ Pastikan output hanya berisi JSON array tersebut agar bisa di-parse secara otoma
     }
   });
 
-  app.get(api.accounting.assets.list.path, isAuthenticated, requireRole("admin"), async (req, res) => {
+  app.get(api.accounting.assets.list.path, isAuthenticated, requireRole("admin"), requireModule("accounting"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const assets = await storage.getFixedAssets(adminId);
@@ -3128,7 +3156,7 @@ Pastikan output hanya berisi JSON array tersebut agar bisa di-parse secara otoma
     }
   });
 
-  app.post(api.accounting.assets.create.path, isAuthenticated, requireRole("admin"), async (req, res) => {
+  app.post(api.accounting.assets.create.path, isAuthenticated, requireRole("admin"), requireModule("accounting"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const asset = await storage.createFixedAsset({ ...req.body, userId: adminId });
@@ -3139,7 +3167,7 @@ Pastikan output hanya berisi JSON array tersebut agar bisa di-parse secara otoma
   });
 
   // Simple Financial Reports
-  app.get(api.accounting.reports.balanceSheet.path, isAuthenticated, requireRole("admin"), async (req, res) => {
+  app.get(api.accounting.reports.balanceSheet.path, isAuthenticated, requireRole("admin"), requireModule("accounting"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const branchId = req.query.branchId ? Number(req.query.branchId) : undefined;
@@ -3188,7 +3216,7 @@ Pastikan output hanya berisi JSON array tersebut agar bisa di-parse secara otoma
     }
   });
 
-  app.get(api.accounting.reports.profitAndLoss.path, isAuthenticated, requireRole("admin"), async (req, res) => {
+  app.get(api.accounting.reports.profitAndLoss.path, isAuthenticated, requireRole("admin"), requireModule("accounting"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const branchId = req.query.branchId ? Number(req.query.branchId) : undefined;
@@ -3228,7 +3256,7 @@ Pastikan output hanya berisi JSON array tersebut agar bisa di-parse secara otoma
   });
 
   // === Phase 21: Finance Module - Cash Ledger ===
-  app.get("/api/accounting/cash-ledger", isAuthenticated, requireRole("admin"), async (req, res) => {
+  app.get("/api/accounting/cash-ledger", isAuthenticated, requireRole("admin"), requireModule("accounting"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const accountId = req.query.accountId ? Number(req.query.accountId) : undefined;
@@ -3798,11 +3826,22 @@ Tugas Anda:
 
   app.post("/api/payments/checkout", isAuthenticated, async (req, res) => {
     try {
-      const { moduleName, amount } = req.body;
+      const { moduleName } = req.body;
       const userId = (req.session as any).userId;
 
-      if (!moduleName || !amount) {
-        return res.status(400).json({ message: "Module name and amount are required" });
+      if (!moduleName) {
+        return res.status(400).json({ message: "Module name is required" });
+      }
+
+      // Validasi harga dari server
+      const moduleInfo = VALID_MODULES.find(m => m.id === moduleName);
+      if (!moduleInfo) {
+        return res.status(400).json({ message: "Invalid module name" });
+      }
+
+      const amount = moduleInfo.price;
+      if (amount <= 0 && moduleName !== "inventory") {
+        return res.status(400).json({ message: "This module is free or price not set" });
       }
 
       const orderId = `MOD-${Date.now()}-${userId.substring(0, 5)}`;
@@ -3876,7 +3915,7 @@ Tugas Anda:
   });
 
   // === Phase 8: Advanced Inventory Valuation ===
-  app.get(api.inventory.valuation.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
+  app.get(api.inventory.valuation.path, isAuthenticated, requireRole("admin", "sku_manager"), requireModule("accounting"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const allProducts = await storage.getProducts(adminId);
@@ -4410,7 +4449,7 @@ Tugas Anda:
   });
 
   // === Phase 12: B2B Wholesale (Pricing & Bundling) ===
-  app.get("/api/pricing/tiered", isAuthenticated, async (req, res) => {
+  app.get("/api/ai/production-advice", isAuthenticated, requireModule("production"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const tiers = await storage.getTieredPricingAll(adminId);
@@ -4524,7 +4563,7 @@ Tugas Anda:
   });
 
   // === Phase 13: Smart AI Insights ===
-  app.get(api.analytics.aiInsights.path, isAuthenticated, requireRole("admin"), async (req, res) => {
+  app.get(api.analytics.aiInsights.path, isAuthenticated, requireRole("admin"), requireModule("accounting"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const apiKey = process.env.GEMINI_API_KEY;
@@ -4535,7 +4574,7 @@ Tugas Anda:
       // 1. Gather Data for AI
       const allProducts = await storage.getProducts(adminId);
       const { saleItems: saleItemsTable, sales: salesTable } = await import("@shared/schema");
-      const { eq, gte, and, sql, desc: drc } = await import("drizzle-orm");
+      const { eq, gte, and, sql } = await import("drizzle-orm");
 
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
@@ -4632,41 +4671,6 @@ Tugas Anda:
     }
   });
 
-  // === Phase 16: RMA & Sales Returns ===
-  app.get(api.rma.list.path, isAuthenticated, requireRole("admin", "cashier", "sku_manager"), async (req, res) => {
-    try {
-      const adminId = await getTeamAdminId(req);
-      const returns = await storage.getSalesReturns(adminId);
-      res.json(returns);
-    } catch (e) {
-      res.status(500).json({ message: "Gagal mengambil daftar retur" });
-    }
-  });
-
-  app.post(api.rma.create.path, isAuthenticated, requireRole("admin", "cashier"), async (req, res) => {
-    try {
-      const adminId = await getTeamAdminId(req);
-      const { saleId, returnNumber, reason, refundAmount, refundMethod, notes, items } = req.body;
-
-      if (!saleId || !items || items.length === 0) {
-        return res.status(400).json({ message: "Data retur tidak lengkap" });
-      }
-
-      const result = await storage.createSalesReturn(adminId, {
-        saleId,
-        returnNumber,
-        reason,
-        refundAmount,
-        refundMethod,
-        notes
-      }, items);
-
-      res.status(201).json(result);
-    } catch (e: any) {
-      console.error("Create RMA Error:", e);
-      res.status(500).json({ message: e.message || "Gagal memproses retur" });
-    }
-  });
 
   app.get("/api/sales/find/:receiptNumber", isAuthenticated, async (req, res) => {
     try {
@@ -4694,6 +4698,26 @@ Tugas Anda:
       res.json(sale);
     } catch (e) {
       res.status(500).json({ message: "Gagal mencari nota" });
+    }
+  });
+
+  // === Phase 9: Real-time Financial Dashboard ===
+  app.get(api.accounting.summary.path, isAuthenticated, requireRole("admin"), requireModule("accounting"), async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const sessionList = await db.select().from(opnameSessions).where(eq(opnameSessions.userId, adminId));
+
+      const stats = {
+        totalSessions: sessionList.length,
+        pendingBackup: sessionList.filter(s => s.status === "completed" && !s.gDriveUrl).length,
+        backedUp: sessionList.filter(s => !!s.gDriveUrl).length,
+        lastBackup: sessionList.filter(s => !!s.gDriveUrl).sort((a, b) => (b.startedAt?.getTime() || 0) - (a.startedAt?.getTime() || 0))[0]?.startedAt
+      };
+
+      res.json(stats);
+    } catch (e) {
+      console.error("Backup stats error:", e);
+      res.status(500).json({ message: "Gagal mengambil statistik backup" });
     }
   });
 
@@ -5010,134 +5034,45 @@ Tugas Anda:
     }
   });
 
-  // --- 3. POST /api/rma/return — Process a return (void + restock) ---
   app.post("/api/rma/return", isAuthenticated, async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const { saleId, returnNumber, reason, refundAmount, refundMethod, notes, items } = req.body;
 
       if (!saleId || !items || items.length === 0) {
-        return res.status(400).json({ message: "Data retur tidak valid" });
+        return res.status(400).json({ message: "Data retur tidak lengkap" });
       }
 
-      const { sales, saleItems, products: productsTable, inventoryLots, activityLogs } = await import("@shared/schema");
-      const { eq, sql } = await import("drizzle-orm");
+      // Security: Validate sale ownership before proceeding
+      const { sales } = await import("@shared/schema");
+      const [sale] = await db.select().from(sales).where(and(eq(sales.id, saleId), eq(sales.userId, adminId)));
+      if (!sale) return res.status(404).json({ message: "Penjualan tidak ditemukan atau akses ditolak" });
 
-      const [sale] = await db.select().from(sales).where(eq(sales.id, saleId));
-      if (!sale) {
-        return res.status(404).json({ message: "Penjualan tidak ditemukan" });
-      }
-      if (sale.voidedAt !== null) {
-        return res.status(400).json({ message: "Penjualan ini sudah di-void sebelumnya" });
-      }
-
-      await db.transaction(async (tx) => {
-        // 1. Mark sale as voided
-        await tx.update(sales)
-          .set({ voidedAt: new Date(), voidedBy: req.user!.id.toString(), notes: `[RMA] ${reason}: ${notes || ""}` })
-          .where(eq(sales.id, saleId));
-
-        // 2. Restock items with accurate COGS
-        const sItems = await tx.select().from(saleItems).where(eq(saleItems.saleId, saleId));
-        let totalCogsCalculated = 0;
-
-        for (const item of items) {
-          const originalItem = sItems.find(si => si.productId === item.productId);
-          if (originalItem) {
-            totalCogsCalculated += Number(originalItem.cogs || 0);
-          }
-
-          if (item.restockStatus === "restocked" && item.quantityReturned > 0) {
-            // Increase product stock
-            await tx.update(productsTable)
-              .set({ currentStock: sql`${productsTable.currentStock} + ${item.quantityReturned}` })
-              .where(eq(productsTable.id, item.productId));
-
-            // Find original COGS unit for this item
-            const product = await tx.select().from(productsTable).where(eq(productsTable.id, item.productId)).then(res => res[0]);
-
-            const originalCogsUnit = (originalItem && originalItem.quantity > 0)
-              ? (Number(originalItem.cogs) / Number(originalItem.quantity))
-              : Number(product?.unitCost || 0);
-
-            // Create inventory lot for restocked items using original price
-            await tx.insert(inventoryLots).values({
-              productId: item.productId,
-              branchId: sale.branchId,
-              purchasePrice: originalCogsUnit.toString(),
-              initialQuantity: item.quantityReturned,
-              remainingQuantity: item.quantityReturned,
-              inboundDate: new Date(),
-              notes: `Restock dari retur #${sale.invoiceNumber}`
-            });
-
-            // LOG: Stock in from return
-            await tx.insert(activityLogs).values({
-              userId: req.user!.id.toString(),
-              branchId: sale.branchId || undefined,
-              entityType: "product",
-              entityId: item.productId,
-              action: "STOCK_IN",
-              details: {
-                type: "rma_restock",
-                reference: sale.invoiceNumber,
-                quantity: item.quantityReturned,
-                reason
-              }
-            });
-          }
-        }
-
-        // 3. Create reversing journal entries
-        const totalAmount = Number(sale.totalAmount || 0);
-        const taxAmount = Number(sale.taxAmount || 0);
-        await storage.autoJournalVoid(saleId, adminId, totalAmount, totalCogsCalculated, sale.type || "pos", taxAmount, sale.branchId || undefined, tx);
-
-        // 4. Reverse loyalty points (Both Earned and Spent)
-        if (sale.customerId) {
-          const { customerLoyaltyLedger, customers } = await import("@shared/schema");
-
-          // A. Reclaim Earned Points (Divisor 1000)
-          const earnedPoints = Math.floor(totalAmount / 1000);
-
-          // B. Return Spent Points
-          const spentPoints = Number(sale.pointsRedeemed || 0);
-
-          const netPointsToReverse = spentPoints - earnedPoints; // Net balance to add/sub from customer
-
-          if (earnedPoints > 0) {
-            await tx.insert(customerLoyaltyLedger).values({
-              customerId: sale.customerId,
-              pointsDelta: -earnedPoints,
-              action: "voided",
-              saleId,
-              note: `Penarikan poin (Void) - RMA #${saleId}`,
-              userId: adminId
-            } as any);
-          }
-
-          if (spentPoints > 0) {
-            await tx.insert(customerLoyaltyLedger).values({
-              customerId: sale.customerId,
-              pointsDelta: spentPoints,
-              action: "voided",
-              saleId,
-              note: `Pengembalian poin (Pernah ditukar) - RMA #${saleId}`,
-              userId: adminId
-            } as any);
-          }
-
-          // Update customer balance
-          const [customer] = await tx.select().from(customers).where(eq(customers.id, sale.customerId));
-          if (customer) {
-            await tx.update(customers)
-              .set({ points: Math.max(0, (customer.points || 0) + netPointsToReverse) })
-              .where(eq(customers.id, sale.customerId));
-          }
-        }
+      // 1. Create Return record
+      const salesReturn = await storage.createSalesReturn({
+        saleId,
+        returnNumber: returnNumber || `RMA-${saleId}-${Date.now()}`,
+        reason,
+        refundAmount: refundAmount || sale.totalAmount,
+        refundMethod: refundMethod || "cash",
+        notes,
+        userId: adminId,
+        items
       });
 
-      res.json({ success: true, returnNumber: returnNumber || `RMA-${saleId}` });
+      // 2. Complete/Process the return (restock, journal, loyalty)
+      await storage.completeSalesReturn(salesReturn.id, adminId);
+
+      // 3. Mark original sale as voided (Multi-tenancy secured via where clause)
+      await db.update(sales)
+        .set({ 
+          voidedAt: new Date(), 
+          voidedBy: req.user!.id.toString(), 
+          notes: `[VOID-RMA] ${reason}: ${notes || ""}` 
+        })
+        .where(and(eq(sales.id, saleId), eq(sales.userId, adminId)));
+
+      res.json({ success: true, returnNumber: salesReturn.returnNumber });
     } catch (err: any) {
       console.error(">>> [POST /api/rma/return] ERROR:", err);
       res.status(500).json({ message: err.message || "Gagal memproses retur" });
@@ -5153,9 +5088,9 @@ Tugas Anda:
       const { inboundSessions, inboundItems } = await import("@shared/schema");
       const { eq } = await import("drizzle-orm");
 
-      const [session] = await db.select().from(inboundSessions).where(eq(inboundSessions.id, sessionId));
+      const [session] = await db.select().from(inboundSessions).where(and(eq(inboundSessions.id, sessionId), eq(inboundSessions.userId, adminId)));
       if (!session) {
-        return res.status(404).json({ message: "Sesi inbound tidak ditemukan" });
+        return res.status(404).json({ message: "Sesi inbound tidak ditemukan atau akses ditolak" });
       }
 
       // Calculate total cost
@@ -5275,6 +5210,7 @@ Tugas Anda:
         return res.status(400).json({ message: "Data tidak lengkap" });
       }
 
+      const adminId = await getTeamAdminId(req);
       const { posPettyCash } = await import("@shared/schema");
 
       const [entry] = await db.insert(posPettyCash).values({
@@ -5282,6 +5218,7 @@ Tugas Anda:
         amount: amount.toString(),
         description,
         type,
+        userId: adminId
       }).returning();
 
       // Log activity
@@ -5317,7 +5254,8 @@ Tugas Anda:
       const { posPettyCash, posSessions } = await import("@shared/schema");
       const { eq, and, gte, lte, desc } = await import("drizzle-orm");
 
-      let conditions = [];
+      const adminId = await getTeamAdminId(req);
+      let conditions = [eq(posSessions.userId, adminId)];
 
       if (sessionId) {
         conditions.push(eq(posPettyCash.sessionId, parseInt(sessionId as string)));
@@ -5364,10 +5302,72 @@ Tugas Anda:
     }
   });
 
+  // === Pricing & Bundling (Phase 15/Audit) ===
+  app.get("/api/pricing/tiered/:productId", isAuthenticated, async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const tiered = await storage.getTieredPricing(Number(req.params.productId), adminId);
+      res.json(tiered);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal mengambil harga bertingkat" });
+    }
+  });
+
+  app.post("/api/pricing/tiered", isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const data = { ...req.body, userId: adminId };
+      const result = await storage.createTieredPricing(data);
+      res.status(201).json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message || "Gagal membuat harga bertingkat" });
+    }
+  });
+
+  app.delete("/api/pricing/tiered/:id", isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      await storage.deleteTieredPricing(Number(req.params.id), adminId);
+      res.sendStatus(204);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal menghapus harga bertingkat" });
+    }
+  });
+
+  app.get("/api/bundling/:parentProductId", isAuthenticated, async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const bundles = await storage.getProductBundles(Number(req.params.parentProductId), adminId);
+      res.json(bundles);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal mengambil data bundling" });
+    }
+  });
+
+  app.post("/api/bundling", isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      const result = await storage.createProductBundle({ ...req.body, userId: adminId });
+      res.status(201).json(result);
+    } catch (err: any) {
+      res.status(500).json({ message: err.message || "Gagal membuat bundling" });
+    }
+  });
+
+  app.delete("/api/bundling/:id", isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
+    try {
+      const adminId = await getTeamAdminId(req);
+      await storage.deleteProductBundle(Number(req.params.id), adminId);
+      res.sendStatus(204);
+    } catch (err) {
+      res.status(500).json({ message: "Gagal menghapus bundling" });
+    }
+  });
+
   // === Business Verticals (Laundry, Restaurants, Barbershop) ===
 
   // 1. Appointments (Barbershop, Clinic, etc.)
-  app.get("/api/appointments", isAuthenticated, async (req, res) => {
+  app.get("/api/appointments", isAuthenticated, requireModule("pos"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const appointments = await storage.getAppointments(adminId);
@@ -5377,7 +5377,7 @@ Tugas Anda:
     }
   });
 
-  app.post("/api/appointments", isAuthenticated, async (req, res) => {
+  app.post("/api/appointments", isAuthenticated, requireModule("pos"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const input = insertAppointmentSchema.parse({ ...req.body, userId: adminId });
@@ -5392,7 +5392,8 @@ Tugas Anda:
   app.patch("/api/appointments/:id", isAuthenticated, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const appointment = await storage.updateAppointment(id, req.body);
+      const adminId = await getTeamAdminId(req);
+      const appointment = await storage.updateAppointment(id, adminId, req.body);
       res.json(appointment);
     } catch (err) {
       res.status(500).json({ message: "Gagal memperbarui reservasi" });
@@ -5401,7 +5402,8 @@ Tugas Anda:
 
   app.delete("/api/appointments/:id", isAuthenticated, async (req, res) => {
     try {
-      await storage.deleteAppointment(Number(req.params.id));
+      const adminId = await getTeamAdminId(req);
+      await storage.deleteAppointment(Number(req.params.id), adminId);
       res.sendStatus(204);
     } catch (err) {
       res.status(500).json({ message: "Gagal menghapus reservasi" });
@@ -5409,7 +5411,7 @@ Tugas Anda:
   });
 
   // 2. Restaurant Tables
-  app.get("/api/tables", isAuthenticated, async (req, res) => {
+  app.get("/api/restaurant-tables", isAuthenticated, requireModule("pos"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const tables = await storage.getRestaurantTables(adminId);
@@ -5433,8 +5435,9 @@ Tugas Anda:
 
   app.patch("/api/tables/:id", isAuthenticated, async (req, res) => {
     try {
+      const adminId = await getTeamAdminId(req);
       const id = Number(req.params.id);
-      const table = await storage.updateRestaurantTable(id, req.body);
+      const table = await storage.updateRestaurantTable(id, adminId, req.body);
       res.json(table);
     } catch (err) {
       res.status(500).json({ message: "Gagal memperbarui status meja" });
@@ -5444,7 +5447,8 @@ Tugas Anda:
   // 3. Order Status Logs (Laundry Washing Steps)
   app.get("/api/orders/:orderId/logs", isAuthenticated, async (req, res) => {
     try {
-      const logs = await storage.getOrderStatusLogs(req.params.orderId);
+      const adminId = await getTeamAdminId(req);
+      const logs = await storage.getOrderStatusLogs(req.params.orderId, adminId);
       res.json(logs);
     } catch (err) {
       res.status(500).json({ message: "Gagal mengambil log status pesanan" });
@@ -5453,7 +5457,13 @@ Tugas Anda:
 
   app.post("/api/orders/:orderId/logs", isAuthenticated, async (req, res) => {
     try {
-      const input = insertOrderStatusLogSchema.parse({ ...req.body, orderId: req.params.orderId });
+      const adminId = await getTeamAdminId(req);
+      const input = insertOrderStatusLogSchema.parse({ 
+        ...req.body, 
+        orderId: req.params.orderId,
+        userId: adminId,
+        createdBy: req.user!.username
+      });
       const log = await storage.createOrderStatusLog(input);
       res.status(201).json(log);
     } catch (err) {
@@ -5465,7 +5475,8 @@ Tugas Anda:
   // 4. Product Modifiers (POS Add-ons)
   app.get("/api/products/:productId/modifiers", isAuthenticated, async (req, res) => {
     try {
-      const modifiers = await storage.getProductModifiers(Number(req.params.productId));
+      const adminId = await getTeamAdminId(req);
+      const modifiers = await storage.getProductModifiers(Number(req.params.productId), adminId);
       res.json(modifiers);
     } catch (err) {
       res.status(500).json({ message: "Gagal mengambil modifier produk" });
@@ -5486,7 +5497,8 @@ Tugas Anda:
 
   app.delete("/api/modifiers/:id", isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
     try {
-      await storage.deleteProductModifier(Number(req.params.id));
+      const adminId = await getTeamAdminId(req);
+      await storage.deleteProductModifier(Number(req.params.id), adminId);
       res.sendStatus(204);
     } catch (err) {
       res.status(500).json({ message: "Gagal menghapus modifier" });

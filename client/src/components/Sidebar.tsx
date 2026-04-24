@@ -32,7 +32,9 @@ import {
   Search,
   Monitor,
   Layers,
-  Cloud
+  Cloud,
+  Waves,
+  Scissors
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useState, useEffect } from "react";
@@ -44,6 +46,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useBackgroundUpload } from "@/components/BackgroundUpload";
 import { BranchSwitcher } from "@/components/BranchSwitcher";
+import { motion, AnimatePresence } from "framer-motion";
 
 interface NavItemProps {
   name: string;
@@ -56,22 +59,31 @@ interface NavItemProps {
 function NavItem({ name, href, icon: Icon, isActive, onClick }: NavItemProps) {
   return (
     <Link href={href}>
-      <div
+      <motion.div
+        whileHover={{ x: 4 }}
+        whileTap={{ scale: 0.98 }}
         onClick={onClick}
         className={cn(
-          "flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 cursor-pointer group mb-1",
+          "flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 cursor-pointer group mb-1 relative overflow-hidden",
           isActive
             ? "bg-white/20 text-white font-bold shadow-lg shadow-black/10 backdrop-blur-md border border-white/20"
             : "text-blue-100/70 hover:text-white hover:bg-white/10"
         )}
         data-testid={`nav-${name.toLowerCase().replace(/\s+/g, "-")}`}
       >
+        {isActive && (
+          <motion.div 
+            layoutId="active-pill"
+            className="absolute left-0 w-1 h-6 bg-white rounded-r-full"
+            transition={{ type: "spring", stiffness: 300, damping: 30 }}
+          />
+        )}
         <Icon className={cn(
           "w-5 h-5 transition-transform duration-200",
           isActive ? "text-white scale-110" : "text-blue-200/50 group-hover:text-white"
         )} />
         <span className="text-[13px] tracking-wide">{name}</span>
-      </div>
+      </motion.div>
     </Link>
   );
 }
@@ -118,19 +130,27 @@ function NavGroup({ label, icon: Icon, items, currentLocation, userRole, isAdmin
         {isOpen ? <ChevronDown className="w-3 h-3 opacity-40" /> : <ChevronRight className="w-3 h-3 opacity-40" />}
       </div>
 
-      {isOpen && (
-        <div className="mt-1 ml-4 border-l border-white/10 pl-2 animate-in slide-in-from-top-2 duration-200">
-          {filteredItems.map(item => (
-            <NavItem
-              key={item.name}
-              name={item.name}
-              href={item.href}
-              icon={item.icon}
-              isActive={currentLocation === item.href || (item.href !== "/" && currentLocation.startsWith(item.href))}
-            />
-          ))}
-        </div>
-      )}
+      <AnimatePresence>
+        {isOpen && (
+          <motion.div 
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.3, ease: [0.2, 0.8, 0.2, 1] }}
+            className="mt-1 ml-4 border-l border-white/10 pl-2 overflow-hidden"
+          >
+            {filteredItems.map(item => (
+              <NavItem
+                key={item.name}
+                name={item.name}
+                href={item.href}
+                icon={item.icon}
+                isActive={currentLocation === item.href || (item.href !== "/" && currentLocation.startsWith(item.href))}
+              />
+            ))}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -158,6 +178,8 @@ export function Sidebar() {
         { name: "Pelanggan (CRM)", href: "/customers", icon: Users },
         { name: "B2B & Pricing", href: "/sales/b2b", icon: Layers, roles: ["admin", "sku_manager"] },
         { name: "Promo & Voucher", href: "/admin/promotions", icon: Sparkles, roles: ["admin"] },
+        { name: "Laundry Operations", href: "/laundry/operations", icon: Waves, roles: ["admin"] },
+        { name: "Barbershop Booking", href: "/barbershop/booking", icon: Scissors, roles: ["admin"] },
         { name: "Rekonsiliasi Kasir", href: "/session-hub", icon: Monitor, roles: ["admin"] },
       ]
     },

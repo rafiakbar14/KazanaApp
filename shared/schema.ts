@@ -44,14 +44,14 @@ export const products = pgTable("products", {
   subCategory: text("sub_category"),
   productCode: text("product_code"),
   description: text("description"),
-  currentStock: integer("current_stock").default(0).notNull(),
+  currentStock: decimal("current_stock").default("0").notNull(),
   unitCost: decimal("unit_cost").default(0),
   sellingPrice: decimal("selling_price").default(0),
   photoUrl: text("photo_url"),
   userId: text("user_id").notNull(),
   locationType: text("location_type", { enum: ["toko", "gudang"] }).default("toko"),
   productType: text("product_type", { enum: ["finished_good", "raw_material", "component"] }).default("finished_good").notNull(),
-  minStock: integer("min_stock").default(0).notNull(),
+  minStock: decimal("min_stock").default("0").notNull(),
   isTaxable: integer("is_taxable").default(1).notNull(),
   taxRate: decimal("tax_rate").default(11.0).notNull(),
   isBundled: integer("is_bundled").default(0).notNull(),
@@ -63,8 +63,8 @@ export const inventoryLots = pgTable("inventory_lots", {
   productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
   branchId: integer("branch_id").references(() => branches.id), // Where this stock is physically located
   purchasePrice: decimal("purchase_price").notNull(),
-  initialQuantity: integer("initial_quantity").notNull(),
-  remainingQuantity: integer("remaining_quantity").notNull(),
+  initialQuantity: decimal("initial_quantity").notNull(),
+  remainingQuantity: decimal("remaining_quantity").notNull(),
   inboundDate: timestamp("inbound_date").defaultNow().notNull(),
   inboundSessionId: integer("inbound_session_id"), // Optional reference to inboundSessions.id
   expiryDate: timestamp("expiry_date"),
@@ -232,7 +232,7 @@ export const inboundItems = pgTable("inbound_items", {
   id: serial("id").primaryKey(),
   sessionId: integer("session_id").references(() => inboundSessions.id).notNull(),
   productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
-  quantityReceived: integer("quantity_received").notNull(),
+  quantityReceived: decimal("quantity_received").notNull(),
   unitCost: decimal("unit_cost").default("0").notNull(),
   expiryDate: timestamp("expiry_date"),
   notes: text("notes"),
@@ -282,7 +282,8 @@ export const outboundItems = pgTable("outbound_items", {
   id: serial("id").primaryKey(),
   sessionId: integer("session_id").references(() => outboundSessions.id).notNull(),
   productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
-  quantityShipped: integer("quantity_shipped").notNull(),
+  quantityShipped: decimal("quantity_shipped").notNull(),
+  quantityReceived: decimal("quantity_received"),
   notes: text("notes"),
 });
 
@@ -375,6 +376,7 @@ export const sales = pgTable("sales", {
   pointsRedeemed: integer("points_redeemed").default(0).notNull(),
   pointsValueRedeemed: decimal("points_value_redeemed").default(0).notNull(),
   orderId: text("order_id"), // Added for Report Hub compatibility
+  tableId: integer("table_id").references(() => restaurantTables.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
@@ -402,6 +404,7 @@ export const saleItems = pgTable("sale_items", {
   discountAmount: decimal("discount_amount").default(0).notNull(),
   cogs: decimal("cogs").default(0).notNull(), // Total HPP persis hasil FIFO untuk item ini
   appliedPromotionId: integer("applied_promotion_id").references(() => promotions.id),
+  metadata: jsonb("metadata"),
 });
 
 export const posRegistrationCodes = pgTable("pos_registration_codes", {
@@ -585,8 +588,8 @@ export const stockTransferItems = pgTable("stock_transfer_items", {
   id: serial("id").primaryKey(),
   transferId: integer("transfer_id").references(() => stockTransfers.id, { onDelete: "cascade" }).notNull(),
   productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
-  quantity: integer("quantity").notNull(),
-  receivedQuantity: integer("received_quantity"),
+  quantity: decimal("quantity").notNull(),
+  receivedQuantity: decimal("received_quantity"),
   notes: text("notes"),
 });
 
@@ -671,6 +674,8 @@ export const orderStatusLogs = pgTable("order_status_logs", {
   orderId: text("order_id").notNull(), // Unified order ID for Laundry / Sales
   statusName: text("status_name").notNull(), // misal: 'Wash', 'Dry', 'Iron', 'Ready'
   notes: text("notes"),
+  branchId: integer("branch_id").references(() => branches.id),
+  userId: text("user_id").notNull(),
   createdBy: text("created_by"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
@@ -934,14 +939,28 @@ export const posDevicesRelations = relations(posDevices, ({ one }) => ({
 }));
 
 export const customerLoyaltyLedgerRelations = relations(customerLoyaltyLedger, ({ one }) => ({
-  customer: one(customers, {
-    fields: [customerLoyaltyLedger.customerId],
-    references: [customers.id],
-  }),
   sale: one(sales, {
     fields: [customerLoyaltyLedger.saleId],
     references: [sales.id],
   }),
+}));
+
+export const appointmentsRelations = relations(appointments, ({ one }) => ({
+  customer: one(customers, { fields: [appointments.customerId], references: [customers.id] }),
+  staff: one(staffMembers, { fields: [appointments.staffId], references: [staffMembers.id] }),
+  branch: one(branches, { fields: [appointments.branchId], references: [branches.id] }),
+}));
+
+export const restaurantTablesRelations = relations(restaurantTables, ({ one }) => ({
+  branch: one(branches, { fields: [restaurantTables.branchId], references: [branches.id] }),
+}));
+
+export const productModifiersRelations = relations(productModifiers, ({ one }) => ({
+  product: one(products, { fields: [productModifiers.productId], references: [products.id] }),
+}));
+
+export const orderStatusLogsRelations = relations(orderStatusLogs, ({ one }) => ({
+  branch: one(branches, { fields: [orderStatusLogs.branchId], references: [branches.id] }),
 }));
 
 // === Insert Schemas ===

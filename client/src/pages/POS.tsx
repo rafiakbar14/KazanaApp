@@ -16,9 +16,9 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { id } from "date-fns/locale";
+import { FloorMap } from "@/components/restaurant/FloorMap";
 
 import { useRole } from "@/hooks/use-role";
 
@@ -48,6 +48,7 @@ export default function POS() {
     const [activeMobileTab, setActiveMobileTab] = useState<"catalog" | "cart" | "history">("catalog");
     const [modifierTargetProduct, setModifierTargetProduct] = useState<any>(null);
     const [selectedModifiers, setSelectedModifiers] = useState<any[]>([]);
+    const [isTableMapOpen, setIsTableMapOpen] = useState(false);
 
     // New Customer Form
     const [newCustomer, setNewCustomer] = useState({ name: "", phone: "" });
@@ -475,32 +476,14 @@ export default function POS() {
 
                             {/* Adjustment Buttons Grid */}
                             <div className="grid grid-cols-4 gap-3">
-                                <Dialog>
-                                    <DialogTrigger asChild>
-                                        <Button variant="outline" className={cn("h-12 rounded-2xl flex flex-col items-center justify-center gap-0.5 border-slate-200 bg-slate-50 hover:bg-white/10 transition-all shadow-sm", pos.selectedTableId && "bg-blue-600/10 border-blue-600/50 text-blue-600")}>
-                                            <UtensilsCrossed className="w-4 h-4" />
-                                            <span className="text-[9px] font-black uppercase tracking-tighter">Meja</span>
-                                        </Button>
-                                    </DialogTrigger>
-                                    <DialogContent className="bg-white border-slate-200 text-slate-900 max-w-md rounded-[2rem] p-6 shadow-3xl">
-                                        <DialogHeader><DialogTitle className="text-blue-900 font-black">Pilih Meja Restoran</DialogTitle></DialogHeader>
-                                        <div className="grid grid-cols-3 gap-3 py-6">
-                                            {pos.tables?.map((t: any) => (
-                                                <button
-                                                    key={t.id}
-                                                    onClick={() => pos.setSelectedTableId(t.id)}
-                                                    className={cn(
-                                                        "h-20 rounded-2xl border-2 flex flex-col items-center justify-center gap-1 transition-all",
-                                                        pos.selectedTableId === t.id ? "bg-blue-600 border-blue-600 text-white shadow-lg shadow-blue-500/20" : "bg-slate-50 border-slate-100 text-slate-500"
-                                                    )}
-                                                >
-                                                    <span className="text-lg font-black">{t.name}</span>
-                                                    <span className="text-[8px] font-bold uppercase">{t.status}</span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </DialogContent>
-                                </Dialog>
+                                <Button 
+                                    variant="outline" 
+                                    className={cn("h-12 rounded-2xl flex flex-col items-center justify-center gap-0.5 border-slate-200 bg-slate-50 hover:bg-white/10 transition-all shadow-sm", pos.selectedTableId && "bg-blue-600/10 border-blue-600/50 text-blue-600")}
+                                    onClick={() => setIsTableMapOpen(true)}
+                                >
+                                    <UtensilsCrossed className="w-4 h-4" />
+                                    <span className="text-[9px] font-black uppercase tracking-tighter">Meja</span>
+                                </Button>
 
                                 <Dialog open={isVoucherOpen} onOpenChange={setIsVoucherOpen}>
                                     <DialogTrigger asChild>
@@ -713,6 +696,25 @@ export default function POS() {
                         onClose={() => setIsSessionPrinterOpen(false)}
                     />
                 )}
+
+                <Dialog open={isTableMapOpen} onOpenChange={setIsTableMapOpen}>
+                    <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto rounded-[2rem]">
+                        <DialogHeader>
+                            <DialogTitle className="flex items-center gap-2">
+                                <UtensilsCrossed className="h-5 w-5 text-primary" />
+                                Denah Meja Restoran
+                            </DialogTitle>
+                        </DialogHeader>
+                        <FloorMap 
+                            onTableSelect={(table) => {
+                                pos.setSelectedTableId(table.id);
+                                setIsTableMapOpen(false);
+                                toast({ title: "Meja Terpilih", description: `Meja ${table.tableNumber} telah dipilih.` });
+                            }} 
+                            selectedTableId={pos.selectedTableId || undefined} 
+                        />
+                    </DialogContent>
+                </Dialog>
 
                 <PrinterSettingsDialog
                     open={isPrinterSettingsOpen}

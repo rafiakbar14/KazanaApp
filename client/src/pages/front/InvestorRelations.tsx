@@ -48,29 +48,36 @@ export default function InvestorRelations() {
       title="Investor Relations" 
       description="Bergabunglah dalam perjalanan Kazana ERP membangun masa depan ekonomi digital untuk jutaan UMKM di Indonesia dan Asia Tenggara."
     >
-      <section className="pt-40 pb-24 bg-[#020617] text-white overflow-hidden relative">
+      <section className="pt-40 pb-32 bg-[#020617] text-white overflow-hidden relative">
          {/* Decorative elements */}
-         <div className="absolute top-0 right-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-10 mix-blend-overlay" />
-         <div className="absolute -top-24 -left-24 w-96 h-96 bg-[#0044CC] rounded-full blur-[150px] opacity-20" />
+         <div className="absolute top-0 right-0 w-full h-full bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-5 mix-blend-overlay" />
+         <div className="absolute -top-48 -left-48 w-[600px] h-[600px] bg-[#0044CC]/20 rounded-full blur-[150px] animate-pulse" />
+         <div className="absolute -bottom-48 -right-48 w-[600px] h-[600px] bg-indigo-600/10 rounded-full blur-[150px]" />
          
          <div className="max-w-[1300px] mx-auto px-6 relative z-10 text-center">
-            <motion.div initial={{ opacity: 0, y: 30 }} animate={{ opacity: 1, y: 0 }}>
-               <div className="inline-flex items-center gap-2 px-4 py-2 bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-400 text-xs font-black uppercase tracking-widest mb-8">
-                  <Rocket className="w-4 h-4" /> Capital for Growth
+            <motion.div 
+               initial={{ opacity: 0, scale: 0.95, y: 40 }}
+               animate={{ opacity: 1, scale: 1, y: 0 }}
+               transition={{ duration: 0.8, ease: [0.2, 0.8, 0.2, 1] }}
+            >
+               <div className="inline-flex items-center gap-2 px-6 py-2 bg-white/5 border border-white/10 rounded-full text-blue-400 text-[10px] font-black uppercase tracking-[0.3em] mb-10 backdrop-blur-md">
+                  <Rocket className="w-4 h-4 animate-bounce" /> Capital for Growth
                </div>
-               <h1 className="text-5xl lg:text-8xl font-black tracking-tighter mb-8 leading-[0.9]">
-                  Membangun <span className="text-[#0044CC]">Masa Depan</span> <br/>Ekonomi UMKM.
+               <h1 className="text-6xl md:text-8xl lg:text-9xl font-black tracking-tighter mb-10 leading-[0.85] text-transparent bg-clip-text bg-gradient-to-b from-white to-white/50">
+                  Membangun <br/>
+                  <span className="text-[#0044CC] drop-shadow-[0_0_30px_rgba(0,68,204,0.3)]">Masa Depan</span> <br/>
+                  Ekonomi UMKM.
                </h1>
-               <p className="text-xl text-slate-400 font-medium max-w-3xl mx-auto mb-12">
-                  Kazana ERP bukan sekadar software kasir. Kami adalah infrastruktur digital yang memberdayakan jutaan pengusaha untuk naik kelas.
+               <p className="text-xl lg:text-2xl text-slate-400 font-medium max-w-3xl mx-auto mb-16 leading-relaxed">
+                  Kazana ERP bukan sekadar software kasir. Kami adalah <span className="text-white">infrastruktur digital</span> yang memberdayakan jutaan pengusaha untuk naik kelas.
                </p>
                <div className="flex flex-col sm:flex-row gap-6 justify-center">
                   <a href="https://wa.me/6283135183093?text=Halo%20CEO%20Kazana%2C%20saya%20tertarik%20berdiskusi%20mengenai%20peluang%20investasi" target="_blank" rel="noopener noreferrer">
-                    <Button className="h-16 px-12 bg-[#0044CC] hover:bg-blue-700 text-white font-black rounded-2xl shadow-2xl uppercase tracking-widest text-xs">
+                    <Button className="h-20 px-14 bg-[#0044CC] hover:bg-blue-600 text-white font-black rounded-3xl shadow-[0_20px_50px_rgba(0,68,204,0.3)] border-t border-white/20 uppercase tracking-[0.2em] text-xs transition-all hover:-translate-y-1">
                         Discuss Investment Opportunity
                     </Button>
                   </a>
-                  <Button variant="outline" className="h-16 px-12 border-slate-700 hover:bg-white/5 text-white font-black rounded-2xl uppercase tracking-widest text-xs">
+                  <Button variant="outline" className="h-20 px-14 border-white/10 hover:bg-white/5 text-white font-black rounded-3xl uppercase tracking-[0.2em] text-xs backdrop-blur-md transition-all hover:border-white/20">
                      Download Pitch Deck (PDF)
                   </Button>
                </div>
@@ -78,35 +85,49 @@ export default function InvestorRelations() {
          </div>
       </section>
 
-      <section className="py-24 bg-white">
-         <div className="max-w-[1300px] mx-auto px-6">
-            <div className="grid lg:grid-cols-2 gap-16 items-center mb-32">
-               <div>
-                  <h2 className="text-4xl lg:text-5xl font-black text-slate-900 tracking-tighter mb-8 italic">Peluang Pasar <span className="text-[#0044CC]">Unicorn</span>.</h2>
-                  <p className="text-lg text-slate-600 font-medium leading-relaxed mb-10">
+      <section className="py-32 bg-white relative overflow-hidden">
+         <div className="absolute top-0 left-0 w-full h-32 bg-gradient-to-b from-[#020617] to-white opacity-100" />
+         
+         <div className="max-w-[1300px] mx-auto px-6 relative z-10">
+            <div className="grid lg:grid-cols-2 gap-20 items-center mb-40">
+               <motion.div
+                  initial={{ opacity: 0, x: -50 }}
+                  whileInView={{ opacity: 1, x: 0 }}
+                  viewport={{ once: true }}
+                  transition={{ duration: 0.6 }}
+               >
+                  <h2 className="text-5xl lg:text-7xl font-black text-slate-900 tracking-tighter mb-10 leading-[0.9]">Peluang Pasar <br/><span className="text-[#0044CC] italic underline decoration-blue-100 underline-offset-8">Unicorn</span>.</h2>
+                  <p className="text-xl text-slate-600 font-medium leading-relaxed mb-12">
                      Indonesia memiliki lebih dari 64 juta UMKM, namun kurang dari 20% yang sudah terdigitalisasi secara maksimal. Kazana mengisi celah tersebut dengan sistem modular yang scalable dan terjangkau.
                   </p>
-                  <div className="grid grid-cols-2 gap-8">
-                     <div className="space-y-2">
-                        <div className="text-3xl font-black text-[#0044CC]">64M+</div>
-                        <div className="text-sm font-bold text-slate-500 uppercase tracking-widest">Total UMKM</div>
+                  <div className="grid grid-cols-2 gap-12">
+                     <div className="space-y-3">
+                        <div className="text-5xl font-black text-[#0044CC] tracking-tighter">64M+</div>
+                        <div className="text-[11px] font-black text-slate-400 uppercase tracking-[0.25em]">Total Target UMKM</div>
                      </div>
-                     <div className="space-y-2">
-                        <div className="text-3xl font-black text-[#0044CC]">$10B+</div>
-                        <div className="text-sm font-bold text-slate-500 uppercase tracking-widest">Digital Economy Potential</div>
+                     <div className="space-y-3">
+                        <div className="text-5xl font-black text-[#0044CC] tracking-tighter">$10B+</div>
+                        <div className="text-[11px] font-black text-slate-400 uppercase tracking-[0.25em]">Digital Economy Potential</div>
                      </div>
                   </div>
-               </div>
-               <div className="p-12 bg-slate-50 rounded-[3rem] border border-slate-100 flex items-center justify-center relative overflow-hidden">
-                   <div className="absolute top-0 right-0 p-8 opacity-5">
-                      <BarChart3 className="w-64 h-64" />
+               </motion.div>
+               <motion.div 
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  whileInView={{ opacity: 1, scale: 1 }}
+                  viewport={{ once: true }}
+                  className="p-16 bg-slate-900 rounded-[4rem] flex items-center justify-center relative overflow-hidden shadow-2xl shadow-blue-900/20"
+               >
+                   <div className="absolute top-0 right-0 p-12 opacity-10">
+                      <BarChart3 className="w-80 h-80 text-blue-500" />
                    </div>
-                   <div className="relative z-10 text-center">
-                       <TrendingUp className="w-16 h-16 text-[#0044CC] mx-auto mb-6" />
-                       <div className="text-2xl font-black text-slate-900 mb-2">Pilar Pertumbuhan Kazana</div>
-                       <div className="text-slate-500 font-medium">Modular, Affordable, & AI-Enabled</div>
+                   <div className="relative z-10 text-center text-white">
+                       <div className="w-24 h-24 bg-[#0044CC] rounded-3xl flex items-center justify-center mx-auto mb-10 shadow-xl shadow-blue-500/20 rotate-6">
+                          <TrendingUp className="w-12 h-12 text-white" />
+                       </div>
+                       <div className="text-3xl font-black mb-4 tracking-tight">Pilar Pertumbuhan Kazana</div>
+                       <div className="text-blue-200/60 font-medium tracking-widest uppercase text-xs">Modular / Affordable / AI-Enabled</div>
                    </div>
-               </div>
+               </motion.div>
             </div>
 
             <div className="mb-24">

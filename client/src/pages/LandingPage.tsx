@@ -91,9 +91,10 @@ const MODULES = [
 
 export default function LandingPage() {
   return (
-    <FrontLayout>
-      {/* Hero Section */}
-
+    <FrontLayout 
+      title="ERP Masa Depan untuk UMKM" 
+      description="Kazana ERP adalah platform manajemen bisnis terlengkap di Indonesia dengan integrasi AI, manajemen stok pintar, dan kasir cloud."
+    >
       {/* Hero Section */}
       <section className="relative pt-32 pb-20 lg:pt-40 lg:pb-32 overflow-hidden px-6 bg-[#FAFAFA]">
         <div className="max-w-[1300px] mx-auto">
@@ -115,11 +116,9 @@ export default function LandingPage() {
                     Coba Sekarang
                   </Button>
                 </Link>
-                <Link href="/login">
-                  <Button variant="outline" className="w-full sm:w-auto h-14 px-8 text-base font-bold border border-slate-300 hover:border-slate-400 text-slate-700 bg-white shadow-sm rounded-lg">
-                    Jadwalkan Demo
-                  </Button>
-                </Link>
+                 <a href="https://wa.me/6283135183093?text=halo%20kak%20saya%20mau%20jadwalkan%20demo" target="_blank" rel="noopener noreferrer" className="w-full sm:w-auto h-14 px-8 flex items-center justify-center text-base font-bold border border-slate-300 hover:border-[#0044CC] hover:text-[#0044CC] text-slate-700 bg-white shadow-sm rounded-lg transition-all">
+                   Hubungi WhatsApp
+                 </a>
               </motion.div>
             </motion.div>
 
@@ -302,12 +301,41 @@ export default function LandingPage() {
               ))}
             </ul>
           </div>
-          <div className="lg:order-1 bg-[#0044CC] rounded-3xl p-8 shadow-2xl overflow-hidden min-h-[300px] flex items-center justify-center">
-             <Store className="w-32 h-32 text-white/20 absolute" />
-             <div className="relative z-10 text-white text-center">
-                <div className="text-4xl font-black mb-2 tracking-tighter">OFFLINE READY</div>
-                <p className="text-blue-100 font-bold uppercase tracking-[0.2em] text-xs">Jualan Jalan Terus Tanpa Internet</p>
-             </div>
+          <div className="lg:order-1 relative group rounded-3xl overflow-hidden min-h-[400px] flex items-center justify-center bg-[#020617] border border-slate-800 shadow-2xl">
+             {/* Dynamic Background */}
+             <div className="absolute inset-0 bg-gradient-to-br from-[#0044CC] via-[#0055EE] to-[#002288] opacity-90" />
+             <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-10 mix-blend-overlay" />
+             
+             {/* Animated Glows */}
+             <motion.div 
+               animate={{ scale: [1, 1.2, 1], opacity: [0.3, 0.5, 0.3] }}
+               transition={{ duration: 4, repeat: Infinity }}
+               className="absolute top-1/4 left-1/4 w-64 h-64 bg-blue-400 rounded-full blur-[100px]" 
+             />
+             
+             {/* Glassmorphic Card */}
+             <motion.div 
+               initial={{ y: 20, opacity: 0 }}
+               whileInView={{ y: 0, opacity: 1 }}
+               viewport={{ once: true }}
+               className="relative z-10 bg-white/10 backdrop-blur-xl border border-white/20 p-12 rounded-[2.5rem] shadow-3xl text-center max-w-[85%]"
+             >
+                <div className="flex justify-center mb-6">
+                   <div className="w-20 h-20 bg-white/10 rounded-3xl flex items-center justify-center border border-white/20 shadow-inner">
+                      <Zap className="w-10 h-10 text-white fill-white/20" />
+                   </div>
+                </div>
+                <div className="text-5xl font-black mb-3 tracking-tightest text-white drop-shadow-2xl">
+                   OFFLINE <span className="text-blue-300 italic">READY</span>
+                </div>
+                <div className="h-px w-24 bg-gradient-to-r from-transparent via-white/40 to-transparent mx-auto mb-4" />
+                <p className="text-blue-100 font-extrabold uppercase tracking-[0.3em] text-[10px] leading-tight opacity-90">
+                   Jualan Jalan Terus <br/> Tanpa Internet
+                </p>
+             </motion.div>
+
+             {/* Background Store Icon - More Subtle */}
+             <Store className="w-64 h-64 text-white/5 absolute -bottom-10 -right-10 rotate-12" />
           </div>
         </div>
       </section>
@@ -335,12 +363,12 @@ export default function LandingPage() {
               ))}
             </ul>
           </div>
-          <div className="bg-slate-900 rounded-3xl p-10 text-white shadow-2xl relative overflow-hidden">
+          <div className="bg-[#020617] rounded-3xl p-10 text-white shadow-2xl relative overflow-hidden border border-slate-800/50">
              <div className="absolute top-0 right-0 p-8 opacity-10">
                 <TrendingUp className="w-48 h-48" />
              </div>
              <div className="relative z-10">
-                <div className="text-xs font-black text-blue-400 uppercase tracking-widest mb-4">Financial Insight</div>
+                <div className="text-xs font-black text-blue-300 uppercase tracking-widest mb-4">Financial Insight</div>
                 <div className="text-3xl font-bold mb-6 italic tracking-tight">"Profit bersih Anda naik 24% bulan ini."</div>
                 <div className="h-2 w-full bg-slate-800 rounded-full overflow-hidden">
                    <div className="h-full w-[74%] bg-blue-500" />
@@ -486,11 +514,11 @@ export default function LandingPage() {
           <p className="text-xl text-slate-500 font-medium mb-10">
             Jika Anda butuh saran fitur apa yang tepat untuk usahamu, tim kami akan dengan senang hati membantu.
           </p>
-          <a href="https://wa.me/your-number" target="_blank" rel="noopener noreferrer">
-            <Button className="h-16 px-12 text-lg font-bold bg-[#0044CC] text-white hover:bg-blue-700 rounded-xl shadow-xl uppercase tracking-wider">
-              Tanya Kami
-            </Button>
-          </a>
+          <a href="https://wa.me/6283135183093?text=halo%20kak%20saya%20butuh%20bantuan%20teknis%20Kazana" target="_blank" rel="noopener noreferrer">
+                 <button className="h-16 px-12 bg-[#0044CC] hover:bg-blue-700 text-white font-black rounded-2xl shadow-xl transition-all uppercase tracking-widest text-[10px]">
+                    Hubungi Support WhatsApp
+                 </button>
+               </a>
         </div>
       </section>
 

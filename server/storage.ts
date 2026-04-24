@@ -334,8 +334,8 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(products).where(eq(products.userId, userId)).orderBy(products.sku);
   }
 
-  async getProduct(id: number): Promise<Product | undefined> {
-    const [product] = await db.select().from(products).where(eq(products.id, id));
+  async getProduct(id: number, userId: string): Promise<Product | undefined> {
+    const [product] = await db.select().from(products).where(and(eq(products.id, id), eq(products.userId, userId)));
     return product;
   }
 
@@ -353,9 +353,14 @@ export class DatabaseStorage implements IStorage {
     return product;
   }
 
-  async updateProduct(id: number, updates: Partial<InsertProduct>): Promise<Product> {
-    const [product] = await db.update(products).set(updates).where(eq(products.id, id)).returning();
+  async updateProduct(id: number, userId: string, updates: Partial<InsertProduct>): Promise<Product> {
+    const [product] = await db.update(products)
+      .set(updates)
+      .where(and(eq(products.id, id), eq(products.userId, userId)))
+      .returning();
     
+    if (!product) throw new Error("Product not found or unauthorized");
+
     await this.createActivityLog({
       action: "UPDATE",
       entityType: "product",
@@ -367,17 +372,17 @@ export class DatabaseStorage implements IStorage {
     return product;
   }
 
-  async deleteProduct(id: number): Promise<void> {
-    const product = await this.getProduct(id);
+  async deleteProduct(id: number, userId: string): Promise<void> {
+    const product = await this.getProduct(id, userId);
     if (product) {
+      await db.delete(products).where(and(eq(products.id, id), eq(products.userId, userId)));
       await this.createActivityLog({
+        userId,
         action: "DELETE",
         entityType: "product",
         entityId: id,
-        userId: product.userId,
         details: { sku: product.sku, name: product.name }
       });
-      await db.delete(products).where(eq(products.id, id));
     }
   }
   
@@ -404,10 +409,15 @@ export class DatabaseStorage implements IStorage {
       .set({ currentStock: 0 })
       .where(and(inArray(products.id, ids), eq(products.userId, userId)));
     
-    // Konsistensi: Reset juga inventory_lots agar stock lot jadi 0
-    await db.update(inventoryLots)
-      .set({ remainingQuantity: 0 })
-      .where(inArray(inventoryLots.productId, ids));
+    // Konsistensi: Reset juga inventory_lots agar stock lot jadi 0, TAPI batasi ke produk milik user ini
+    const userProducts = await db.select({ id: products.id }).from(products).where(and(inArray(products.id, ids), eq(products.userId, userId)));
+    const validIds = userProducts.map(p => p.id);
+    
+    if (validIds.length > 0) {
+      await db.update(inventoryLots)
+        .set({ remainingQuantity: "0" })
+        .where(inArray(inventoryLots.productId, validIds));
+    }
 
     await this.createAuditLog({
       action: "BULK_RESET_STOCK",
@@ -430,36 +440,61 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async getProductPhotos(productId: number): Promise<ProductPhoto[]> {
+  async getProductPhotos(productId: number, userId: string): Promise<ProductPhoto[]> {
+    // Verify product belongs to user
+    const [product] = await db.select().from(products).where(and(eq(products.id, productId), eq(products.userId, userId)));
+    if (!product) return [];
     return await db.select().from(productPhotos).where(eq(productPhotos.productId, productId));
   }
 
-  async addProductPhoto(data: InsertProductPhoto): Promise<ProductPhoto> {
+  async addProductPhoto(data: InsertProductPhoto, userId: string): Promise<ProductPhoto> {
+    const [product] = await db.select().from(products).where(and(eq(products.id, data.productId), eq(products.userId, userId)));
+    if (!product) throw new Error("Product not found or unauthorized");
     const [photo] = await db.insert(productPhotos).values(data).returning();
     return photo;
   }
 
-  async deleteProductPhoto(id: number): Promise<void> {
-    await db.delete(productPhotos).where(eq(productPhotos.id, id));
+  async deleteProductPhoto(id: number, userId: string): Promise<void> {
+    // Verify product belongs to user
+    const [photo] = await db.select({ productId: productPhotos.productId }).from(productPhotos).where(eq(productPhotos.id, id));
+    if (photo) {
+      const [product] = await db.select().from(products).where(and(eq(products.id, photo.productId), eq(products.userId, userId)));
+      if (product) {
+        await db.delete(productPhotos).where(eq(productPhotos.id, id));
+      }
+    }
   }
 
 
 
-  async getProductUnits(productId: number): Promise<ProductUnit[] | any> {
+  async getProductUnits(productId: number, userId: string): Promise<ProductUnit[] | any> {
+    const [product] = await db.select().from(products).where(and(eq(products.id, productId), eq(products.userId, userId)));
+    if (!product) return [];
     return await db.select().from(productUnits).where(eq(productUnits.productId, productId)).orderBy(productUnits.sortOrder);
   }
 
-  async addProductUnit(data: InsertProductUnit): Promise<ProductUnit> {
+  async addProductUnit(data: InsertProductUnit, userId: string): Promise<ProductUnit> {
+    const [product] = await db.select().from(products).where(and(eq(products.id, data.productId), eq(products.userId, userId)));
+    if (!product) throw new Error("Product not found or unauthorized");
     const [unit] = await db.insert(productUnits).values(data).returning();
     return unit;
   }
 
-  async updateProductUnit(id: number, data: Partial<InsertProductUnit>): Promise<ProductUnit> {
-    const [unit] = await db.update(productUnits).set(data).where(eq(productUnits.id, id)).returning();
-    return unit;
+  async updateProductUnit(id: number, userId: string, data: Partial<InsertProductUnit>): Promise<ProductUnit> {
+    const [unitRecord] = await db.select().from(productUnits).where(eq(productUnits.id, id));
+    if (!unitRecord) throw new Error("Unit not found");
+    const [product] = await db.select().from(products).where(and(eq(products.id, unitRecord.productId), eq(products.userId, userId)));
+    if (!product) throw new Error("Unauthorized");
+    
+    const [updated] = await db.update(productUnits).set(data).where(eq(productUnits.id, id)).returning();
+    return updated;
   }
 
-  async deleteProductUnit(id: number): Promise<void> {
+  async deleteProductUnit(id: number, userId: string): Promise<void> {
+    const [unitRecord] = await db.select().from(productUnits).where(eq(productUnits.id, id));
+    if (!unitRecord) return;
+    const [product] = await db.select().from(products).where(and(eq(products.id, unitRecord.productId), eq(products.userId, userId)));
+    if (!product) return;
     await db.delete(productUnits).where(eq(productUnits.id, id));
   }
 
@@ -479,8 +514,8 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(opnameSessions.startedAt));
   }
 
-  async getSession(id: number): Promise<OpnameSessionWithRecords | undefined> {
-    const [session] = await db.select().from(opnameSessions).where(eq(opnameSessions.id, id));
+  async getSession(id: number, userId: string): Promise<OpnameSessionWithRecords | undefined> {
+    const [session] = await db.select().from(opnameSessions).where(and(eq(opnameSessions.id, id), eq(opnameSessions.userId, userId)));
     if (!session) return undefined;
 
     const records = await db.query.opnameRecords.findMany({
@@ -517,12 +552,12 @@ export class DatabaseStorage implements IStorage {
     return session;
   }
 
-  async completeSession(id: number): Promise<OpnameSession> {
-    const { eq, sql } = await import("drizzle-orm");
+  async completeSession(id: number, userId: string): Promise<OpnameSession> {
+    const { eq, and, sql } = await import("drizzle-orm");
 
     return await db.transaction(async (tx) => {
-      const [session] = await tx.select().from(opnameSessions).where(eq(opnameSessions.id, id));
-      if (!session) throw new Error("Session not found");
+      const [session] = await tx.select().from(opnameSessions).where(and(eq(opnameSessions.id, id), eq(opnameSessions.userId, userId)));
+      if (!session) throw new Error("Session not found or unauthorized");
 
       const records = await tx.select().from(opnameRecords).where(eq(opnameRecords.sessionId, id));
       const adjustments: { type: "shrinkage" | "surplus", amount: number, productName: string, branchId?: number }[] = [];
@@ -622,31 +657,38 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async setSessionGDriveUrl(id: number, gDriveUrl: string): Promise<OpnameSession> {
+  async setSessionGDriveUrl(id: number, userId: string, gDriveUrl: string): Promise<OpnameSession> {
     const [session] = await db.update(opnameSessions)
       .set({ gDriveUrl })
-      .where(eq(opnameSessions.id, id))
+      .where(and(eq(opnameSessions.id, id), eq(opnameSessions.userId, userId)))
       .returning();
+    if (!session) throw new Error("Session not found or unauthorized");
     return session;
   }
 
-  async setSessionBackupStatus(id: number, backupStatus: string): Promise<OpnameSession> {
+  async setSessionBackupStatus(id: number, userId: string, backupStatus: string): Promise<OpnameSession> {
     const [session] = await db.update(opnameSessions)
       .set({ backupStatus: backupStatus as any })
-      .where(eq(opnameSessions.id, id))
+      .where(and(eq(opnameSessions.id, id), eq(opnameSessions.userId, userId)))
       .returning();
+    if (!session) throw new Error("Session not found or unauthorized");
     return session;
   }
 
-  async updateSession(id: number, updates: Partial<InsertOpnameSession>): Promise<OpnameSession> {
+  async updateSession(id: number, userId: string, updates: Partial<InsertOpnameSession>): Promise<OpnameSession> {
     const [session] = await db.update(opnameSessions)
       .set(updates)
-      .where(eq(opnameSessions.id, id))
+      .where(and(eq(opnameSessions.id, id), eq(opnameSessions.userId, userId)))
       .returning();
+    if (!session) throw new Error("Session not found or unauthorized");
     return session;
   }
 
-  async updateRecord(sessionId: number, productId: number, actualStock: number, notes?: string, unitValues?: string, countedBy?: string, returnedQuantity?: number, returnedNotes?: string): Promise<OpnameRecord> {
+  async updateRecord(sessionId: number, userId: string, productId: number, actualStock: number, notes?: string, unitValues?: string, countedBy?: string, returnedQuantity?: number, returnedNotes?: string): Promise<OpnameRecord> {
+    // Verify session belongs to user
+    const [session] = await db.select().from(opnameSessions).where(and(eq(opnameSessions.id, sessionId), eq(opnameSessions.userId, userId)));
+    if (!session) throw new Error("Unauthorized session access");
+
     const [existing] = await db.select().from(opnameRecords).where(
       and(eq(opnameRecords.sessionId, sessionId), eq(opnameRecords.productId, productId))
     );
@@ -686,7 +728,11 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async updateRecordPhoto(sessionId: number, productId: number, photoUrl: string): Promise<OpnameRecord> {
+  async updateRecordPhoto(sessionId: number, userId: string, productId: number, photoUrl: string): Promise<OpnameRecord> {
+    // Verify session belongs to user
+    const [session] = await db.select().from(opnameSessions).where(and(eq(opnameSessions.id, sessionId), eq(opnameSessions.userId, userId)));
+    if (!session) throw new Error("Unauthorized session access");
+
     const [existing] = await db.select().from(opnameRecords).where(
       and(eq(opnameRecords.sessionId, sessionId), eq(opnameRecords.productId, productId))
     );
@@ -716,8 +762,23 @@ export class DatabaseStorage implements IStorage {
     return photo;
   }
 
-  async deleteRecordPhoto(id: number): Promise<void> {
-    await db.delete(opnameRecordPhotos).where(eq(opnameRecordPhotos.id, id));
+  async deleteRecordPhoto(id: number, userId: string): Promise<void> {
+    const [existing] = await db.select({ 
+      recordId: opnameRecordPhotos.recordId 
+    }).from(opnameRecordPhotos).where(eq(opnameRecordPhotos.id, id));
+    
+    if (existing) {
+      const [record] = await db.select({ 
+        sessionId: opnameRecords.sessionId 
+      }).from(opnameRecords).where(eq(opnameRecords.id, existing.recordId));
+      
+      if (record) {
+        const [session] = await db.select().from(opnameSessions).where(and(eq(opnameSessions.id, record.sessionId), eq(opnameSessions.userId, userId)));
+        if (session) {
+          await db.delete(opnameRecordPhotos).where(eq(opnameRecordPhotos.id, id));
+        }
+      }
+    }
   }
 
   async getUserRole(userId: string): Promise<UserRole | undefined> {
@@ -751,13 +812,14 @@ export class DatabaseStorage implements IStorage {
     return member;
   }
 
-  async updateStaffMember(id: number, data: Partial<InsertStaffMember>): Promise<StaffMember> {
-    const [member] = await db.update(staffMembers).set(data).where(eq(staffMembers.id, id)).returning();
+  async updateStaffMember(id: number, userId: string, data: Partial<InsertStaffMember>): Promise<StaffMember> {
+    const [member] = await db.update(staffMembers).set(data).where(and(eq(staffMembers.id, id), eq(staffMembers.userId, userId))).returning();
+    if (!member) throw new Error("Staff member not found or unauthorized");
     return member;
   }
 
-  async deleteStaffMember(id: number): Promise<void> {
-    await db.delete(staffMembers).where(eq(staffMembers.id, id));
+  async deleteStaffMember(id: number, userId: string): Promise<void> {
+    await db.delete(staffMembers).where(and(eq(staffMembers.id, id), eq(staffMembers.userId, userId)));
   }
 
   async getAnnouncements(userId: string): Promise<Announcement[]> {
@@ -769,13 +831,14 @@ export class DatabaseStorage implements IStorage {
     return announcement;
   }
 
-  async updateAnnouncement(id: number, data: Partial<InsertAnnouncement>): Promise<Announcement> {
-    const [announcement] = await db.update(announcements).set(data).where(eq(announcements.id, id)).returning();
+  async updateAnnouncement(id: number, userId: string, data: Partial<InsertAnnouncement>): Promise<Announcement> {
+    const [announcement] = await db.update(announcements).set(data).where(and(eq(announcements.id, id), eq(announcements.userId, userId))).returning();
+    if (!announcement) throw new Error("Announcement not found or unauthorized");
     return announcement;
   }
 
-  async deleteAnnouncement(id: number): Promise<void> {
-    await db.delete(announcements).where(eq(announcements.id, id));
+  async deleteAnnouncement(id: number, userId: string): Promise<void> {
+    await db.delete(announcements).where(and(eq(announcements.id, id), eq(announcements.userId, userId)));
   }
 
   async getFeedback(userId: string): Promise<Feedback[]> {
@@ -787,8 +850,8 @@ export class DatabaseStorage implements IStorage {
     return fb;
   }
 
-  async deleteFeedback(id: number): Promise<void> {
-    await db.delete(feedback).where(eq(feedback.id, id));
+  async deleteFeedback(id: number, userId: string): Promise<void> {
+    await db.delete(feedback).where(and(eq(feedback.id, id), eq(feedback.userId, userId)));
   }
 
   async getAllFeedback(): Promise<Feedback[]> {
@@ -804,13 +867,14 @@ export class DatabaseStorage implements IStorage {
     return msg;
   }
 
-  async updateMotivationMessage(id: number, data: Partial<InsertMotivationMessage>): Promise<MotivationMessage> {
-    const [msg] = await db.update(motivationMessages).set(data).where(eq(motivationMessages.id, id)).returning();
+  async updateMotivationMessage(id: number, userId: string, data: Partial<InsertMotivationMessage>): Promise<MotivationMessage> {
+    const [msg] = await db.update(motivationMessages).set(data).where(and(eq(motivationMessages.id, id), eq(motivationMessages.userId, userId))).returning();
+    if (!msg) throw new Error("Message not found or unauthorized");
     return msg;
   }
 
-  async deleteMotivationMessage(id: number): Promise<void> {
-    await db.delete(motivationMessages).where(eq(motivationMessages.id, id));
+  async deleteMotivationMessage(id: number, userId: string): Promise<void> {
+    await db.delete(motivationMessages).where(and(eq(motivationMessages.id, id), eq(motivationMessages.userId, userId)));
   }
 
   async getCategoryPriorities(userId: string): Promise<CategoryPriority[]> {
@@ -829,9 +893,9 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(inboundSessions).where(eq(inboundSessions.userId, userId)).orderBy(desc(inboundSessions.startedAt));
   }
 
-  async getInboundSession(id: number): Promise<InboundSessionWithItems | undefined> {
+  async getInboundSession(id: number, userId: string): Promise<InboundSessionWithItems | undefined> {
     const session = await db.query.inboundSessions.findFirst({
-      where: eq(inboundSessions.id, id),
+      where: and(eq(inboundSessions.id, id), eq(inboundSessions.userId, userId)),
       with: {
         items: {
           with: {
@@ -851,11 +915,13 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async completeInboundSession(id: number): Promise<InboundSession> {
+  async completeInboundSession(id: number, userId: string): Promise<InboundSession> {
     const [session] = await db.update(inboundSessions)
       .set({ status: "completed", completedAt: new Date() })
-      .where(eq(inboundSessions.id, id))
+      .where(and(eq(inboundSessions.id, id), eq(inboundSessions.userId, userId)))
       .returning();
+
+    if (!session) throw new Error("Inbound session not found or unauthorized");
 
     // Update stock levels
     const items = await db.select().from(inboundItems).where(eq(inboundItems.sessionId, id));
@@ -908,8 +974,14 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async removeInboundItem(id: number): Promise<void> {
-    await db.delete(inboundItems).where(eq(inboundItems.id, id));
+  async removeInboundItem(id: number, userId: string): Promise<void> {
+    const [item] = await db.select({ sessionId: inboundItems.sessionId }).from(inboundItems).where(eq(inboundItems.id, id));
+    if (item) {
+      const [session] = await db.select().from(inboundSessions).where(and(eq(inboundSessions.id, item.sessionId), eq(inboundSessions.userId, userId)));
+      if (session) {
+        await db.delete(inboundItems).where(eq(inboundItems.id, id));
+      }
+    }
   }
 
   async addInboundItemPhoto(itemId: number, url: string): Promise<InboundItemPhoto> {
@@ -917,15 +989,25 @@ export class DatabaseStorage implements IStorage {
     return photo;
   }
 
-  async deleteInboundItemPhoto(id: number): Promise<void> {
-    await db.delete(inboundItemPhotos).where(eq(inboundItemPhotos.id, id));
+  async deleteInboundItemPhoto(id: number, userId: string): Promise<void> {
+    const [photo] = await db.select({ itemId: inboundItemPhotos.itemId }).from(inboundItemPhotos).where(eq(inboundItemPhotos.id, id));
+    if (photo) {
+      const [item] = await db.select({ sessionId: inboundItems.sessionId }).from(inboundItems).where(eq(inboundItems.id, photo.itemId));
+      if (item) {
+        const [session] = await db.select().from(inboundSessions).where(and(eq(inboundSessions.id, item.sessionId), eq(inboundSessions.userId, userId)));
+        if (session) {
+          await db.delete(inboundItemPhotos).where(eq(inboundItemPhotos.id, id));
+        }
+      }
+    }
   }
 
-  async updateInboundSignatures(id: number, data: Partial<InboundSession>): Promise<InboundSession> {
+  async updateInboundSignatures(id: number, userId: string, data: Partial<InboundSession>): Promise<InboundSession> {
     const [session] = await db.update(inboundSessions)
       .set(data)
-      .where(eq(inboundSessions.id, id))
+      .where(and(eq(inboundSessions.id, id), eq(inboundSessions.userId, userId)))
       .returning();
+    if (!session) throw new Error("Inbound session not found or unauthorized");
     return session;
   }
 
@@ -934,9 +1016,9 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(outboundSessions).where(eq(outboundSessions.userId, userId)).orderBy(desc(outboundSessions.startedAt));
   }
 
-  async getOutboundSession(id: number): Promise<OutboundSessionWithItems | undefined> {
+  async getOutboundSession(id: number, userId: string): Promise<OutboundSessionWithItems | undefined> {
     const session = await db.query.outboundSessions.findFirst({
-      where: eq(outboundSessions.id, id),
+      where: and(eq(outboundSessions.id, id), eq(outboundSessions.userId, userId)),
       with: {
         items: {
           with: {
@@ -960,90 +1042,93 @@ export class DatabaseStorage implements IStorage {
   async completeOutboundSession(id: number): Promise<OutboundSession> {
     const { eq } = await import("drizzle-orm");
 
-    const [session] = await db.select().from(outboundSessions).where(eq(outboundSessions.id, id));
-    if (!session) throw new Error("Outbound session not found");
+    return await db.transaction(async (tx) => {
+      const [session] = await tx.select().from(outboundSessions).where(eq(outboundSessions.id, id));
+      if (!session) throw new Error("Outbound session not found");
 
-    const items = await db.select().from(outboundItems).where(eq(outboundItems.sessionId, id));
-    let totalOutboundCogs = 0;
+      const items = await tx.select().from(outboundItems).where(eq(outboundItems.sessionId, id));
+      let totalOutboundCogs = 0;
 
-    // Update stock levels using FIFO within the specific branch
-    for (const item of items) {
-      const [product] = await db.select().from(products).where(eq(products.id, item.productId));
-      if (product) {
-        // Step 1: Deduct from LOTS using FIFO from the SOURCE BRANCH
-        const itemCogs = await this.deductFifoStockAndGetCogs(product.id, item.quantityShipped, session.fromBranchId || undefined);
-        totalOutboundCogs += itemCogs;
-
-        // Step 2: Update Product Current Stock (Global Cache)
-        const newStock = Math.max(0, product.currentStock - item.quantityShipped);
-        await db.update(products)
-          .set({ currentStock: newStock })
-          .where(eq(products.id, item.productId));
-      }
-    }
-
-    // Step 3: Accounting Journal (Branch-Aware)
-    if (totalOutboundCogs > 0) {
-      await this.ensureDefaultAccounts(session.userId);
-      const accountsList = await this.getAccounts(session.userId);
-      const findAcc = (code: string) => accountsList.find(a => a.code === code);
-      
-      const invAcc = findAcc("1201");
-      const outAcc = session.toBranchId ? findAcc("1201") : findAcc("5101"); 
-      
-      if (invAcc && outAcc) {
-        await this.createJournalEntry(
-          { 
-            description: `Outbound #${id} (${session.toBranchId ? "Mutasi" : "Pengeluaran"}): ${session.title}`, 
-            reference: `OUT-${id}`, 
-            userId: session.userId, 
-            date: new Date() 
-          },
-          [
-            // Credit from Origin (Decrease Asset)
-            { accountId: invAcc.id, debit: 0, credit: totalOutboundCogs, userId: session.userId, branchId: session.fromBranchId },
-            // Debit to Destination or Expense (Increase Asset or Cost)
-            { accountId: outAcc.id, debit: totalOutboundCogs, credit: 0, userId: session.userId, branchId: session.toBranchId || session.fromBranchId },
-          ]
-        );
-      }
-    }
-
-    // Auto-create Inbound session for the destination if it's a transfer
-    if (session.toBranchId) {
-      const [inboundSession] = await db.insert(inboundSessions).values([{
-        title: `Kiriman Masuk: ${session.title}`,
-        userId: session.userId,
-        branchId: session.toBranchId, // Masuk ke cabang tujuan
-        status: "in_progress",
-        notes: `Otomatis dari Outbound #${session.id} (Cabang Asal: ${session.fromBranchId ?? "Gudang Utama"}).`,
-      }]).returning();
-
+      // Update stock levels using FIFO within the specific branch
       for (const item of items) {
-        await db.insert(inboundItems).values([{
-          sessionId: inboundSession.id,
-          productId: item.productId,
-          quantityReceived: item.quantityShipped,
-          notes: item.notes,
-        }]);
+        const [product] = await tx.select().from(products).where(eq(products.id, item.productId));
+        if (product) {
+          // Step 1: Deduct from LOTS using FIFO from the SOURCE BRANCH
+          const itemCogs = await this.deductFifoStockAndGetCogs(product.id, item.quantityShipped, session.fromBranchId || undefined, tx);
+          totalOutboundCogs += itemCogs;
+
+          // Step 2: Update Product Current Stock (Global Cache)
+          const newStock = Math.max(0, (product.currentStock || 0) - item.quantityShipped);
+          await tx.update(products)
+            .set({ currentStock: newStock })
+            .where(eq(products.id, item.productId));
+        }
       }
-    }
 
-    // Mark as shipped
-    const [updatedSession] = await db.update(outboundSessions)
-      .set({ status: "shipped", shippedAt: new Date() })
-      .where(eq(outboundSessions.id, id))
-      .returning();
+      // Step 3: Accounting Journal (Branch-Aware)
+      if (totalOutboundCogs > 0) {
+        await this.ensureDefaultAccounts(session.userId);
+        const userAccounts = await this.getAccounts(session.userId);
+        const findAcc = (code: string) => userAccounts.find(a => a.code === code);
+        
+        const invAcc = findAcc("1201");
+        const outAcc = session.toBranchId ? findAcc("1201") : findAcc("5101"); 
+        
+        if (invAcc && outAcc) {
+          await this.createJournalEntry(
+            { 
+              description: `Outbound #${id} (${session.toBranchId ? "Mutasi" : "Pengeluaran"}): ${session.title}`, 
+              reference: `OUT-${id}`, 
+              userId: session.userId, 
+              date: new Date() 
+            },
+            [
+              // Credit from Origin (Decrease Asset)
+              { accountId: invAcc.id, debit: 0, credit: totalOutboundCogs, userId: session.userId, branchId: session.fromBranchId },
+              // Debit to Destination or Expense (Increase Asset or Cost)
+              { accountId: outAcc.id, debit: totalOutboundCogs, credit: 0, userId: session.userId, branchId: session.toBranchId || session.fromBranchId },
+            ],
+            tx
+          );
+        }
+      }
 
-    // Log Activity
-    await this.createActivityLog({
-      userId: session.userId,
-      branchId: session.fromBranchId,
-      action: "COMPLETE_OUTBOUND",
-      details: `Outbound Selesai: ${session.title}. Tujuan: ${session.toBranchId ?? "Internal"}. Nilai: Rp${totalOutboundCogs.toLocaleString("id-ID")}`
+      // Auto-create Inbound session for the destination if it's a transfer
+      if (session.toBranchId) {
+        const [inboundSession] = await tx.insert(inboundSessions).values([{
+          title: `Kiriman Masuk: ${session.title}`,
+          userId: session.userId,
+          branchId: session.toBranchId, // Masuk ke cabang tujuan
+          status: "in_progress",
+          notes: `Otomatis dari Outbound #${session.id} (Cabang Asal: ${session.fromBranchId ?? "Gudang Utama"}).`,
+        }]).returning();
+
+        for (const item of items) {
+          await tx.insert(inboundItems).values([{
+            sessionId: inboundSession.id,
+            productId: item.productId,
+            quantityReceived: item.quantityShipped,
+            notes: item.notes,
+          }]);
+        }
+      }
+
+      // Mark as shipped
+      const [updatedSession] = await tx.update(outboundSessions)
+        .set({ status: "shipped", shippedAt: new Date() })
+        .where(eq(outboundSessions.id, id))
+        .returning();
+
+      // Log Activity
+      await this.createActivityLog({
+        userId: session.userId,
+        branchId: session.fromBranchId,
+        action: "COMPLETE_OUTBOUND",
+        details: `Outbound Selesai: ${session.title}. Tujuan: ${session.toBranchId ?? "Internal"}. Nilai: Rp${totalOutboundCogs.toLocaleString("id-ID")}`
+      }, tx);
+
+      return updatedSession;
     });
-
-    return updatedSession;
   }
 
   async addOutboundItem(item: InsertOutboundItem): Promise<OutboundItem> {
@@ -1071,7 +1156,10 @@ export class DatabaseStorage implements IStorage {
       .returning();
     return session;
   }
-  async getBranches(): Promise<Branch[]> {
+  async getBranches(userId?: string): Promise<Branch[]> {
+    if (userId) {
+      return db.select().from(branches).where(eq(branches.userId, userId));
+    }
     return db.select().from(branches);
   }
 
@@ -1080,9 +1168,9 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(boms).where(eq(boms.userId, userId));
   }
 
-  async getBOM(id: number): Promise<BomWithItems | undefined> {
+  async getBOM(id: number, userId: string): Promise<BomWithItems | undefined> {
     const bom = await db.query.boms.findFirst({
-      where: eq(boms.id, id),
+      where: and(eq(boms.id, id), eq(boms.userId, userId)),
       with: {
         items: {
           with: {
@@ -1102,31 +1190,40 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async updateBOM(id: number, updates: Partial<InsertBom>): Promise<Bom> {
-    const [result] = await db.update(boms).set(updates).where(eq(boms.id, id)).returning();
+  async updateBOM(id: number, userId: string, updates: Partial<InsertBom>): Promise<Bom> {
+    const [result] = await db.update(boms).set(updates).where(and(eq(boms.id, id), eq(boms.userId, userId))).returning();
+    if (!result) throw new Error("BOM not found or unauthorized");
     return result;
   }
 
-  async deleteBOM(id: number): Promise<void> {
-    await db.delete(boms).where(eq(boms.id, id));
+  async deleteBOM(id: number, userId: string): Promise<void> {
+    await db.delete(boms).where(and(eq(boms.id, id), eq(boms.userId, userId)));
   }
 
-  async addBOMItem(item: InsertBomItem): Promise<BomItem> {
+  async addBOMItem(item: InsertBomItem, userId: string): Promise<BomItem> {
+    const [bomRecord] = await db.select().from(boms).where(and(eq(boms.id, item.bomId), eq(boms.userId, userId)));
+    if (!bomRecord) throw new Error("BOM not found or unauthorized");
     const [result] = await db.insert(bomItems).values(item).returning();
     return result;
   }
 
-  async removeBOMItem(id: number): Promise<void> {
-    await db.delete(bomItems).where(eq(bomItems.id, id));
+  async removeBOMItem(id: number, userId: string): Promise<void> {
+    const [item] = await db.select({ bomId: bomItems.bomId }).from(bomItems).where(eq(bomItems.id, id));
+    if (item) {
+      const [bomRecord] = await db.select().from(boms).where(and(eq(boms.id, item.bomId), eq(boms.userId, userId)));
+      if (bomRecord) {
+        await db.delete(bomItems).where(eq(bomItems.id, id));
+      }
+    }
   }
 
   async getAssemblySessions(userId: string): Promise<AssemblySession[]> {
     return await db.select().from(assemblySessions).where(eq(assemblySessions.userId, userId)).orderBy(desc(assemblySessions.createdAt));
   }
 
-  async getAssemblySession(id: number): Promise<AssemblySessionWithBOM | undefined> {
+  async getAssemblySession(id: number, userId: string): Promise<AssemblySessionWithBOM | undefined> {
     const session = await db.query.assemblySessions.findFirst({
-      where: eq(assemblySessions.id, id),
+      where: and(eq(assemblySessions.id, id), eq(assemblySessions.userId, userId)),
       with: {
         bom: {
           with: {
@@ -1150,107 +1247,110 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async completeAssemblySession(id: number): Promise<AssemblySession> {
-    const { eq } = await import("drizzle-orm");
+  async completeAssemblySession(id: number, userId: string): Promise<AssemblySession> {
+    const { eq, and } = await import("drizzle-orm");
 
-    const [session] = await db.select().from(assemblySessions).where(eq(assemblySessions.id, id));
-    if (!session) throw new Error("Assembly session not found");
+    return await db.transaction(async (tx) => {
+      const [session] = await tx.select().from(assemblySessions).where(and(eq(assemblySessions.id, id), eq(assemblySessions.userId, userId)));
+      if (!session) throw new Error("Assembly session not found or unauthorized");
 
-    const bom = await this.getBOM(session.bomId);
-    if (!bom) throw new Error("BOM not found");
+      const bom = await this.getBOM(session.bomId);
+      if (!bom) throw new Error("BOM not found");
 
-    let totalMaterialCogs = 0;
+      let totalMaterialCogs = 0;
 
-    // 1. Deduct Materials using FIFO from the specific branch
-    for (const item of bom.items) {
-      const neededQty = Number(item.quantityNeeded) * Number(session.quantityProduced);
-      const materialCogs = await this.deductFifoStockAndGetCogs(item.productId, neededQty, session.branchId || undefined);
-      totalMaterialCogs += materialCogs;
+      // 1. Deduct Materials using FIFO from the specific branch
+      for (const item of bom.items) {
+        const neededQty = Number(item.quantityNeeded) * Number(session.quantityProduced);
+        const materialCogs = await this.deductFifoStockAndGetCogs(item.productId, neededQty, session.branchId || undefined, tx);
+        totalMaterialCogs += materialCogs;
 
-      // Update global stock count
-      const [product] = await db.select().from(products).where(eq(products.id, item.productId));
-      if (product) {
-        await db.update(products)
-          .set({ currentStock: Math.max(0, product.currentStock - neededQty) })
-          .where(eq(products.id, item.productId));
+        // Update global stock count
+        const [product] = await tx.select().from(products).where(eq(products.id, item.productId));
+        if (product) {
+          await tx.update(products)
+            .set({ currentStock: Math.max(0, (product.currentStock || 0) - neededQty) })
+            .where(eq(products.id, item.productId));
+        }
       }
-    }
 
-    // 2. Calculate Final HPP (Materials + Labor + Overhead)
-    const labor = Number(session.laborCost || 0);
-    const overhead = Number(session.overheadCost || 0);
-    const totalProductionCost = totalMaterialCogs + labor + overhead;
-    const hppPerUnit = totalProductionCost / Number(session.quantityProduced);
+      // 2. Calculate Final HPP (Materials + Labor + Overhead)
+      const labor = Number(session.laborCost || 0);
+      const overhead = Number(session.overheadCost || 0);
+      const totalProductionCost = totalMaterialCogs + labor + overhead;
+      const hppPerUnit = totalProductionCost / Number(session.quantityProduced);
 
-    // 3. Create Inventory Lot for the Finished Good in the target branch
-    const [targetProduct] = await db.select().from(products).where(eq(products.id, bom.targetProductId));
-    if (targetProduct) {
-      await db.insert(inventoryLots).values({
-        productId: targetProduct.id,
+      // 3. Create Inventory Lot for the Finished Good in the target branch
+      const [targetProduct] = await tx.select().from(products).where(eq(products.id, bom.targetProductId));
+      if (targetProduct) {
+        await tx.insert(inventoryLots).values({
+          productId: targetProduct.id,
+          branchId: session.branchId,
+          purchasePrice: hppPerUnit.toString(),
+          initialQuantity: Number(session.quantityProduced),
+          remainingQuantity: Number(session.quantityProduced),
+          inboundDate: new Date(),
+          notes: `Produksi BOM #${bom.id}: ${bom.name}`
+        } as any);
+
+        // Update global stock
+        await tx.update(products)
+          .set({ currentStock: (targetProduct.currentStock || 0) + Number(session.quantityProduced) })
+          .where(eq(products.id, targetProduct.id));
+      }
+
+      // 4. Automated Journal Entry (Inventory WIP/FG)
+      await this.ensureDefaultAccounts(session.userId);
+      const userAccounts = await this.getAccounts(session.userId);
+      const findAcc = (code: string) => userAccounts.find(a => a.code === code);
+
+      const fgAcc = findAcc("1201"); // Finished Goods
+      const rmAcc = findAcc("1201"); // Raw Materials
+      const allocAcc = findAcc("2103"); // Allocation account for labor/overhead
+
+      if (fgAcc && rmAcc) {
+        const journalItems = [
+          { accountId: fgAcc.id, debit: totalProductionCost, credit: 0, userId: session.userId, branchId: session.branchId },
+          { accountId: rmAcc.id, debit: 0, credit: totalMaterialCogs, userId: session.userId, branchId: session.branchId },
+        ];
+
+        if ((labor + overhead) > 0 && allocAcc) {
+          journalItems.push({ 
+             accountId: allocAcc.id, 
+             debit: 0, 
+             credit: labor + overhead, 
+             userId: session.userId, 
+             branchId: session.branchId 
+          });
+        }
+
+        await this.createJournalEntry(
+          { 
+            description: `Produksi Produk Jadi: ${targetProduct?.name || "Unknown"} x ${session.quantityProduced}`, 
+            reference: `ASM-${session.id}`, 
+            userId: session.userId, 
+            date: new Date() 
+          },
+          journalItems,
+          tx
+        );
+      }
+
+      const [updated] = await tx.update(assemblySessions)
+        .set({ status: "completed" })
+        .where(eq(assemblySessions.id, id))
+        .returning();
+      
+      // Log Activity
+      await this.createActivityLog({
+        userId: session.userId,
         branchId: session.branchId,
-        purchasePrice: hppPerUnit.toString(),
-        initialQuantity: Number(session.quantityProduced),
-        remainingQuantity: Number(session.quantityProduced),
-        inboundDate: new Date(),
-        notes: `Produksi BOM #${bom.id}: ${bom.name}`
-      } as any);
+        action: "COMPLETE_PRODUCTION",
+        details: `Selesai Produksi: ${targetProduct?.name}. Qty: ${session.quantityProduced}. Total HPP: Rp${totalProductionCost.toLocaleString("id-ID")}`
+      }, tx);
 
-      // Update global stock
-      await db.update(products)
-        .set({ currentStock: (targetProduct.currentStock || 0) + Number(session.quantityProduced) })
-        .where(eq(products.id, targetProduct.id));
-    }
-
-    // 4. Automated Journal Entry (Inventory WIP/FG)
-    await this.ensureDefaultAccounts(session.userId);
-    const accountsList = await this.getAccounts(session.userId);
-    const findAcc = (code: string) => accountsList.find(a => a.code === code);
-
-    const fgAcc = findAcc("1201"); // Finished Goods
-    const rmAcc = findAcc("1201"); // Raw Materials (Assuming same inventory account for now, but branchId keeps them distinct)
-    const allocAcc = findAcc("2103"); // Allocation account for labor/overhead
-
-    if (fgAcc && rmAcc) {
-      const journalItems = [
-        { accountId: fgAcc.id, debit: totalProductionCost, credit: 0, userId: session.userId, branchId: session.branchId },
-        { accountId: rmAcc.id, debit: 0, credit: totalMaterialCogs, userId: session.userId, branchId: session.branchId },
-      ];
-
-      if ((labor + overhead) > 0 && allocAcc) {
-        journalItems.push({ 
-           accountId: allocAcc.id, 
-           debit: 0, 
-           credit: labor + overhead, 
-           userId: session.userId, 
-           branchId: session.branchId 
-        });
-      }
-
-      await this.createJournalEntry(
-        { 
-          description: `Produksi Produk Jadi: ${targetProduct?.name || "Unknown"} x ${session.quantityProduced}`, 
-          reference: `ASM-${session.id}`, 
-          userId: session.userId, 
-          date: new Date() 
-        },
-        journalItems
-      );
-    }
-
-    const [updated] = await db.update(assemblySessions)
-      .set({ status: "completed" })
-      .where(eq(assemblySessions.id, id))
-      .returning();
-    
-    // Log Activity
-    await this.createActivityLog({
-      userId: session.userId,
-      branchId: session.branchId,
-      action: "COMPLETE_PRODUCTION",
-      details: `Selesai Produksi: ${targetProduct?.name}. Qty: ${session.quantityProduced}. Total HPP: Rp${totalProductionCost.toLocaleString("id-ID")}`
+      return updated;
     });
-
-    return updated;
   }
 
   // === POS & Sales ===
@@ -1275,9 +1375,9 @@ export class DatabaseStorage implements IStorage {
     })) as unknown as SaleWithItems[];
   }
 
-  async getSale(id: number, txContext?: any): Promise<SaleWithItems | undefined> {
+  async getSale(id: number, userId: string, txContext?: any): Promise<SaleWithItems | undefined> {
     const executor = txContext || db;
-    const [sale] = await executor.select().from(sales).where(eq(sales.id, id));
+    const [sale] = await executor.select().from(sales).where(and(eq(sales.id, id), eq(sales.userId, userId)));
     if (!sale) return undefined;
 
     const items = await executor.select().from(saleItems)
@@ -1299,6 +1399,79 @@ export class DatabaseStorage implements IStorage {
       items: items.map(i => ({ ...i.sale_items, product: i.products! }))
     } as unknown as SaleWithItems;
   }
+
+  async getRestaurantTables(userId: string): Promise<RestaurantTable[]> {
+    return await db.select().from(restaurantTables).where(eq(restaurantTables.userId, userId));
+  }
+
+  async createRestaurantTable(table: InsertRestaurantTable): Promise<RestaurantTable> {
+    const [newTable] = await db.insert(restaurantTables).values(table).returning();
+    return newTable;
+  }
+
+  async updateRestaurantTable(id: number, userId: string, data: Partial<RestaurantTable>): Promise<RestaurantTable> {
+    const [updatedTable] = await db.update(restaurantTables)
+      .set(data)
+      .where(and(eq(restaurantTables.id, id), eq(restaurantTables.userId, userId)))
+      .returning();
+    if (!updatedTable) throw new Error("Table not found or unauthorized");
+    return updatedTable;
+  }
+
+  async deleteRestaurantTable(id: number, userId: string): Promise<void> {
+    await db.delete(restaurantTables)
+      .where(and(eq(restaurantTables.id, id), eq(restaurantTables.userId, userId)));
+  }
+
+  // === Appointments ===
+  async getAppointments(userId: string): Promise<Appointment[]> {
+    return await db.select().from(appointments).where(eq(appointments.userId, userId));
+  }
+
+  async createAppointment(appointment: InsertAppointment): Promise<Appointment> {
+    const [result] = await db.insert(appointments).values(appointment).returning();
+    return result;
+  }
+
+  async updateAppointment(id: number, userId: string, data: Partial<Appointment>): Promise<Appointment> {
+    const [updated] = await db.update(appointments).set(data).where(and(eq(appointments.id, id), eq(appointments.userId, userId))).returning();
+    if (!updated) throw new Error("Appointment not found or unauthorized");
+    return updated;
+  }
+
+  async deleteAppointment(id: number, userId: string): Promise<void> {
+    await db.delete(appointments).where(and(eq(appointments.id, id), eq(appointments.userId, userId)));
+  }
+
+  // === Order Status Logs (Laundry/Resto) ===
+  async getOrderStatusLogs(orderId: string, userId: string): Promise<OrderStatusLog[]> {
+    return await db.select()
+      .from(orderStatusLogs)
+      .where(and(eq(orderStatusLogs.orderId, orderId), eq(orderStatusLogs.userId, userId)))
+      .orderBy(orderStatusLogs.createdAt);
+  }
+
+  async createOrderStatusLog(log: InsertOrderStatusLog): Promise<OrderStatusLog> {
+    const [newLog] = await db.insert(orderStatusLogs).values(log).returning();
+    return newLog;
+  }
+
+  // === Product Modifiers ===
+  async getProductModifiers(productId: number, userId: string): Promise<ProductModifier[]> {
+    return await db.select().from(productModifiers).where(and(eq(productModifiers.productId, productId), eq(productModifiers.userId, userId)));
+  }
+
+  async createProductModifier(modifier: InsertProductModifier, userId: string): Promise<ProductModifier> {
+    const [product] = await db.select().from(products).where(and(eq(products.id, modifier.productId), eq(products.userId, userId)));
+    if (!product) throw new Error("Product not found or unauthorized");
+    const [newModifier] = await db.insert(productModifiers).values({ ...modifier, userId }).returning();
+    return newModifier;
+  }
+
+  async deleteProductModifier(id: number, userId: string): Promise<void> {
+    await db.delete(productModifiers).where(and(eq(productModifiers.id, id), eq(productModifiers.userId, userId)));
+  }
+
 
   async createSale(sale: InsertSale, items: InsertSaleItem[]): Promise<SaleWithItems> {
     console.log(">>> [storage.createSale] FUNCTION ENTERED");
@@ -1480,6 +1653,13 @@ export class DatabaseStorage implements IStorage {
       const [newSale] = await tx.insert(sales).values(saleData).returning();
       console.log(">>> [createSale] STEP 7: INSERT SALE SUCCESS ID:", newSale.id);
 
+      // === Phase 4: Handle Restaurant Table Status ===
+      if (newSale.tableId) {
+        await tx.update(restaurantTables)
+          .set({ status: "occupied" })
+          .where(eq(restaurantTables.id, newSale.tableId));
+      }
+
       for (const vItem of validatedItems) {
         console.log(">>> [createSale] STEP 8: INSERTING ITEM FOR PRODUCT:", vItem.productId);
         await tx.insert(saleItems).values({
@@ -1488,7 +1668,8 @@ export class DatabaseStorage implements IStorage {
           unitPrice: Number(vItem.unitPrice),
           subtotal: Number(vItem.subtotal),
           discountAmount: Number(vItem.discountAmount || 0),
-          appliedPromotionId: vItem.appliedPromotionId || null
+          appliedPromotionId: vItem.appliedPromotionId || null,
+          metadata: vItem.metadata || null
         });
 
           // Log stock movement for ledger
@@ -1797,9 +1978,10 @@ export class DatabaseStorage implements IStorage {
     return newSupplier;
   }
 
-  async updateSupplier(id: number, data: Partial<InsertSupplier>): Promise<Supplier> {
+  async updateSupplier(id: number, userId: string, data: Partial<InsertSupplier>): Promise<Supplier> {
     const { suppliers } = await import("@shared/schema");
-    const [updated] = await db.update(suppliers).set(data).where(eq(suppliers.id, id)).returning();
+    const [updated] = await db.update(suppliers).set(data).where(and(eq(suppliers.id, id), eq(suppliers.userId, userId))).returning();
+    if (!updated) throw new Error("Supplier not found or unauthorized");
     return updated;
   }
 
@@ -1830,17 +2012,17 @@ export class DatabaseStorage implements IStorage {
     return newPo;
   }
 
-  async completePurchaseOrder(id: number): Promise<any> {
+  async completePurchaseOrder(id: number, userId: string): Promise<any> {
     const { purchaseOrders, inboundSessions, inboundItems } = await import("@shared/schema");
     
     const po = await db.query.purchaseOrders.findFirst({
-        where: eq(purchaseOrders.id, id),
+        where: and(eq(purchaseOrders.id, id), eq(purchaseOrders.userId, userId)),
         with: { items: true }
     });
     
-    if (!po) throw new Error("PO tidak ditemukan");
+    if (!po) throw new Error("PO tidak ditemukan atau unauthorized");
     
-    await db.update(purchaseOrders).set({ status: "completed", updatedAt: new Date() }).where(eq(purchaseOrders.id, id));
+    await db.update(purchaseOrders).set({ status: "completed", updatedAt: new Date() }).where(and(eq(purchaseOrders.id, id), eq(purchaseOrders.userId, userId)));
     
     // Create inbound session automatically from PO
     const [session] = await db.insert(inboundSessions).values({
@@ -1958,8 +2140,10 @@ export class DatabaseStorage implements IStorage {
   }
 
   // === POS Devices ===
-  async getPosDevice(deviceId: string): Promise<PosDevice | undefined> {
-    const [device] = await db.select().from(posDevices).where(eq(posDevices.deviceId, deviceId));
+  async getPosDevice(deviceId: string, userId?: string): Promise<PosDevice | undefined> {
+    const conditions = [eq(posDevices.deviceId, deviceId)];
+    if (userId) conditions.push(eq(posDevices.userId, userId));
+    const [device] = await db.select().from(posDevices).where(and(...conditions));
     return device;
   }
 
@@ -1978,8 +2162,8 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async deletePosDevice(id: number): Promise<void> {
-    await db.delete(posDevices).where(eq(posDevices.id, id));
+  async deletePosDevice(id: number, userId: string): Promise<void> {
+    await db.delete(posDevices).where(and(eq(posDevices.id, id), eq(posDevices.userId, userId)));
   }
 
   async getPosRegistrationCode(code: string): Promise<any> {
@@ -2023,8 +2207,8 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async deletePromotion(id: number): Promise<void> {
-    await db.delete(promotions).where(eq(promotions.id, id));
+  async deletePromotion(id: number, userId: string): Promise<void> {
+    await db.delete(promotions).where(and(eq(promotions.id, id), eq(promotions.userId, userId)));
   }
 
   async getActivePromotions(userId: string): Promise<Promotion[]> {
@@ -2121,7 +2305,7 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async createJournalEntry(entry: InsertJournalEntry, items: Omit<InsertJournalItem, "entryId" | "id">[]): Promise<JournalEntry> {
+  async createJournalEntry(entry: InsertJournalEntry, items: Omit<InsertJournalItem, "entryId" | "id">[], txContext?: any): Promise<JournalEntry> {
     const totalDebit = items.reduce((sum, i) => sum + Number(i.debit || 0), 0);
     const totalCredit = items.reduce((sum, i) => sum + Number(i.credit || 0), 0);
 
@@ -2130,9 +2314,10 @@ export class DatabaseStorage implements IStorage {
       throw new Error(`Jurnal tidak seimbang: Total Debit (${totalDebit}) != Total Credit (${totalCredit}). Selisih: ${Math.abs(totalDebit - totalCredit)}`);
     }
 
-    const [newEntry] = await db.insert(journalEntries).values(entry).returning();
+    const executor = txContext || db;
+    const [newEntry] = await executor.insert(journalEntries).values(entry).returning();
     for (const item of items) {
-      await db.insert(journalItems).values({ ...item, entryId: newEntry.id } as InsertJournalItem);
+      await executor.insert(journalItems).values({ ...item, entryId: newEntry.id } as InsertJournalItem);
     }
     return newEntry;
   }
@@ -2603,15 +2788,18 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async closePOSSession(id: number, data: { closingBalance: number; actualCash: number; notes?: string }): Promise<PosSession> {
+  async closePOSSession(id: number, userId: string, data: { closingBalance: number; actualCash: number; notes?: string }): Promise<PosSession> {
     const [result] = await db.update(posSessions)
       .set({ ...data, status: "closed", endTime: new Date() })
-      .where(eq(posSessions.id, id))
+      .where(and(eq(posSessions.id, id), eq(posSessions.userId, userId)))
       .returning();
+    if (!result) throw new Error("Session not found or unauthorized");
     return result;
   }
 
-  async getPettyCash(sessionId: number): Promise<PosPettyCash[]> {
+  async getPettyCash(sessionId: number, userId: string): Promise<PosPettyCash[]> {
+    const [session] = await db.select().from(posSessions).where(and(eq(posSessions.id, sessionId), eq(posSessions.userId, userId)));
+    if (!session) return [];
     return await db.select().from(posPettyCash).where(eq(posPettyCash.sessionId, sessionId)).orderBy(desc(posPettyCash.createdAt));
   }
 
@@ -2620,17 +2808,27 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async getPendingSales(sessionId: number): Promise<PosPendingSale[]> {
+  async getPendingSales(sessionId: number, userId: string): Promise<PosPendingSale[]> {
+    const [session] = await db.select().from(posSessions).where(and(eq(posSessions.id, sessionId), eq(posSessions.userId, userId)));
+    if (!session) return [];
     return await db.select().from(posPendingSales).where(eq(posPendingSales.sessionId, sessionId)).orderBy(desc(posPendingSales.createdAt));
   }
 
-  async savePendingSale(data: InsertPosPendingSale): Promise<PosPendingSale> {
+  async savePendingSale(data: InsertPosPendingSale, userId: string): Promise<PosPendingSale> {
+    const [session] = await db.select().from(posSessions).where(and(eq(posSessions.id, data.sessionId), eq(posSessions.userId, userId)));
+    if (!session) throw new Error("Session not found or unauthorized");
     const [result] = await db.insert(posPendingSales).values(data).returning();
     return result;
   }
 
-  async deletePendingSale(id: number): Promise<void> {
-    await db.delete(posPendingSales).where(eq(posPendingSales.id, id));
+  async deletePendingSale(id: number, userId: string): Promise<void> {
+    const [pending] = await db.select({ sessionId: posPendingSales.sessionId }).from(posPendingSales).where(eq(posPendingSales.id, id));
+    if (pending) {
+      const [session] = await db.select().from(posSessions).where(and(eq(posSessions.id, pending.sessionId), eq(posSessions.userId, userId)));
+      if (session) {
+        await db.delete(posPendingSales).where(eq(posPendingSales.id, id));
+      }
+    }
   }
 
   // Vouchers
@@ -2674,30 +2872,40 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(tieredPricing).where(eq(tieredPricing.userId, userId)).orderBy(tieredPricing.minQuantity);
   }
 
-  async getTieredPricing(productId: number): Promise<TieredPricing[]> {
+  async getTieredPricing(productId: number, userId: string): Promise<TieredPricing[]> {
+    // Verify product ownership
+    const [product] = await db.select().from(products).where(and(eq(products.id, productId), eq(products.userId, userId)));
+    if (!product) return [];
     return await db.select().from(tieredPricing).where(eq(tieredPricing.productId, productId)).orderBy(tieredPricing.minQuantity);
   }
 
-  async createTieredPricing(data: InsertTieredPricing): Promise<TieredPricing> {
-    const [result] = await db.insert(tieredPricing).values(data).returning();
+  async createTieredPricing(data: InsertTieredPricing, userId: string): Promise<TieredPricing> {
+    const [product] = await db.select().from(products).where(and(eq(products.id, data.productId), eq(products.userId, userId)));
+    if (!product) throw new Error("Product not found or unauthorized");
+    const [result] = await db.insert(tieredPricing).values({ ...data, userId }).returning();
     return result;
   }
 
-  async deleteTieredPricing(id: number): Promise<void> {
-    await db.delete(tieredPricing).where(eq(tieredPricing.id, id));
+  async deleteTieredPricing(id: number, userId: string): Promise<void> {
+    await db.delete(tieredPricing).where(and(eq(tieredPricing.id, id), eq(tieredPricing.userId, userId)));
   }
 
-  async getProductBundles(parentProductId: number): Promise<ProductBundle[]> {
+  async getProductBundles(parentProductId: number, userId: string): Promise<ProductBundle[]> {
+    // Verify parent product ownership
+    const [parent] = await db.select().from(products).where(and(eq(products.id, parentProductId), eq(products.userId, userId)));
+    if (!parent) return [];
     return await db.select().from(productBundles).where(eq(productBundles.parentProductId, parentProductId));
   }
 
-  async createProductBundle(data: InsertProductBundle): Promise<ProductBundle> {
-    const [result] = await db.insert(productBundles).values(data).returning();
+  async createProductBundle(data: InsertProductBundle, userId: string): Promise<ProductBundle> {
+    const [product] = await db.select().from(products).where(and(eq(products.id, data.parentProductId), eq(products.userId, userId)));
+    if (!product) throw new Error("Parent product not found or unauthorized");
+    const [result] = await db.insert(productBundles).values({ ...data, userId }).returning();
     return result;
   }
 
-  async deleteProductBundle(id: number): Promise<void> {
-    await db.delete(productBundles).where(eq(productBundles.id, id));
+  async deleteProductBundle(id: number, userId: string): Promise<void> {
+    await db.delete(productBundles).where(and(eq(productBundles.id, id), eq(productBundles.userId, userId)));
   }
 
   // === Categories & Units ===
@@ -2796,8 +3004,9 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(activityLogs).orderBy(desc(activityLogs.createdAt));
   }
 
-  async createActivityLog(data: InsertActivityLog): Promise<ActivityLog> {
-    const [log] = await db.insert(activityLogs).values(data).returning();
+  async createActivityLog(data: InsertActivityLog, txContext?: any): Promise<ActivityLog> {
+    const executor = txContext || db;
+    const [log] = await executor.insert(activityLogs).values(data).returning();
     return log;
   }
 
@@ -2853,6 +3062,18 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createStockTransfer(userId: string, transfer: InsertStockTransfer, items: InsertStockTransferItem[]): Promise<any> {
+    // Security: Validate fromBranch ownership
+    if (transfer.fromBranchId) {
+      const [branch] = await db.select().from(branches).where(and(eq(branches.id, transfer.fromBranchId), eq(branches.userId, userId)));
+      if (!branch) throw new Error("Source branch not found or unauthorized");
+    }
+    
+    // Security: Validate toBranch ownership
+    if (transfer.toBranchId) {
+      const [branch] = await db.select().from(branches).where(and(eq(branches.id, transfer.toBranchId), eq(branches.userId, userId)));
+      if (!branch) throw new Error("Destination branch not found or unauthorized");
+    }
+
     const [result] = await db.insert(stockTransfers).values({ ...transfer, userId }).returning();
     
     for (const item of items) {
@@ -2860,7 +3081,6 @@ export class DatabaseStorage implements IStorage {
       
       // If status is in_transit, deduct stock from source branch immediately
       if (transfer.status === "in_transit" && transfer.fromBranchId) {
-        // deductFifoStockAndGetCogs will handle lot reduction in the specific branch
         await this.deductFifoStockAndGetCogs(item.productId, item.quantity, transfer.fromBranchId);
       }
     }
@@ -2876,14 +3096,15 @@ export class DatabaseStorage implements IStorage {
     return result;
   }
 
-  async completeStockTransfer(id: number, receivedBy: string): Promise<any> {
+  async completeStockTransfer(id: number, userId: string, receivedBy: string): Promise<any> {
     const transfer = await this.getStockTransfer(id);
-    if (!transfer || transfer.status === "received") return transfer;
+    if (!transfer || transfer.userId !== userId) throw new Error("Transfer not found or unauthorized");
+    if (transfer.status === "received") return transfer;
 
     // 1. Update status
     const [updated] = await db.update(stockTransfers)
       .set({ status: "received", receivedBy, receivedAt: new Date() })
-      .where(eq(stockTransfers.id, id))
+      .where(and(eq(stockTransfers.id, id), eq(stockTransfers.userId, userId)))
       .returning();
 
     // 2. Add stock to Destination Branch (inventory_lots)
@@ -2900,7 +3121,7 @@ export class DatabaseStorage implements IStorage {
           initialQuantity: item.quantity,
           remainingQuantity: item.quantity,
           inboundDate: new Date(),
-          notes: `Transfer from ${transfer.fromBranch?.name || "Other Branch"} (#${transfer.id})`
+          notes: `Penerimaan Mutasi #${transfer.id} (Oleh ${receivedBy})`
         });
       }
     }
@@ -3271,20 +3492,21 @@ export class DatabaseStorage implements IStorage {
   // === Phase 16: RMA & Sales Returns ===
   async createSalesReturn(data: InsertSalesReturn & { items: InsertSalesReturnItem[] }): Promise<SalesReturn> {
     return await db.transaction(async (tx) => {
-      const [newReturn] = await tx.insert(salesReturns).values(data).returning();
-      for (const item of data.items) {
+      const { items, ...returnData } = data;
+      const [newReturn] = await tx.insert(salesReturns).values(returnData).returning();
+      for (const item of items) {
         await tx.insert(salesReturnItems).values({ ...item, returnId: newReturn.id } as any);
       }
       return newReturn;
     });
   }
 
-  async completeSalesReturn(id: number): Promise<SalesReturn> {
-    const { eq } = await import("drizzle-orm");
+  async completeSalesReturn(id: number, userId: string): Promise<SalesReturn> {
+    const { eq, and } = await import("drizzle-orm");
     return await db.transaction(async (tx) => {
       const [salesReturn] = await tx.update(salesReturns)
         .set({ status: "completed" })
-        .where(eq(salesReturns.id, id))
+        .where(and(eq(salesReturns.id, id), eq(salesReturns.userId, userId)))
         .returning();
 
       if (!salesReturn) throw new Error("Sales Return not found");
@@ -3321,10 +3543,11 @@ export class DatabaseStorage implements IStorage {
         }
       }
 
-      const { sales, users } = await import("@shared/schema");
+      const { sales, users, customerLoyaltyLedger, customers: customersTable } = await import("@shared/schema");
       const [saleInfo] = await tx.select().from(sales).where(eq(sales.id, salesReturn.saleId));
 
       if (saleInfo) {
+         // A. Journal Reversal
          await this.autoJournalVoid(
            salesReturn.saleId, 
            salesReturn.userId, 
@@ -3335,98 +3558,49 @@ export class DatabaseStorage implements IStorage {
            saleInfo.branchId || undefined, 
            tx
          );
+
+         // B. Reverse Loyalty Points
+         if (saleInfo.customerId) {
+           const totalAmount = Number(saleInfo.totalAmount || 0);
+           const earnedPoints = Math.floor(totalAmount / 1000);
+           const spentPoints = Number(saleInfo.pointsRedeemed || 0);
+           const netPointsToReverse = spentPoints - earnedPoints;
+
+           if (earnedPoints > 0) {
+             await tx.insert(customerLoyaltyLedger).values({
+               customerId: saleInfo.customerId,
+               pointsDelta: -earnedPoints,
+               action: "voided",
+               saleId: salesReturn.saleId,
+               note: `Penarikan poin (Void) - RMA #${salesReturn.id}`,
+               userId: salesReturn.userId
+             } as any);
+           }
+
+           if (spentPoints > 0) {
+             await tx.insert(customerLoyaltyLedger).values({
+               customerId: saleInfo.customerId,
+               pointsDelta: spentPoints,
+               action: "voided",
+               saleId: salesReturn.saleId,
+               note: `Pengembalian poin (Refund) - RMA #${salesReturn.id}`,
+               userId: salesReturn.userId
+             } as any);
+           }
+
+           const [customer] = await tx.select().from(customersTable).where(eq(customersTable.id, saleInfo.customerId));
+           if (customer) {
+             await tx.update(customersTable)
+               .set({ points: Math.max(0, (customer.points || 0) + netPointsToReverse) })
+               .where(eq(customersTable.id, saleInfo.customerId));
+           }
+         }
       }
 
       return salesReturn;
     });
   }
 
-  async getSalesReturns(userId: string): Promise<SalesReturn[]> {
-    const { eq, desc } = await import("drizzle-orm");
-    return await db.select()
-      .from(salesReturns)
-      .where(eq(salesReturns.userId, userId))
-      .orderBy(desc(salesReturns.createdAt));
-  }
-
-  // === Phase 9: Stock Transfers (Logistics) ===
-  async getStockTransfers(userId: string): Promise<StockTransfer[]> {
-    const { eq, desc } = await import("drizzle-orm");
-    return await db.select()
-      .from(stockTransfers)
-      .where(eq(stockTransfers.userId, userId))
-      .orderBy(desc(stockTransfers.createdAt));
-  }
-
-  async getStockTransfer(id: number): Promise<StockTransferWithItems | null> {
-    const { eq } = await import("drizzle-orm");
-    const [transfer] = await db.select().from(stockTransfers).where(eq(stockTransfers.id, id));
-    if (!transfer) return null;
-
-    const items = await db.select().from(stockTransferItems).where(eq(stockTransferItems.transferId, id));
-    
-    // Attach products
-    const itemsWithProduct = await Promise.all(items.map(async (item) => {
-      const [product] = await db.select().from(products).where(eq(products.id, item.productId));
-      return { ...item, product };
-    }));
-
-    const [fromBranch] = transfer.fromBranchId ? await db.select().from(branches).where(eq(branches.id, transfer.fromBranchId)) : [null];
-    const [toBranch] = transfer.toBranchId ? await db.select().from(branches).where(eq(branches.id, transfer.toBranchId)) : [null];
-
-    return { ...transfer, items: itemsWithProduct, fromBranch, toBranch } as any;
-  }
-
-  async createStockTransfer(userId: string, data: InsertStockTransfer, items: InsertStockTransferItem[]): Promise<StockTransfer> {
-    return await db.transaction(async (tx) => {
-      const [newTransfer] = await tx.insert(stockTransfers).values(data).returning();
-      for (const item of items) {
-        await tx.insert(stockTransferItems).values({ ...item, transferId: newTransfer.id } as any);
-      }
-      return newTransfer;
-    });
-  }
-
-  async completeStockTransfer(id: number, receivedBy: string): Promise<StockTransfer> {
-    const { eq } = await import("drizzle-orm");
-    return await db.transaction(async (tx) => {
-      const [transfer] = await tx.update(stockTransfers)
-        .set({ status: "received", receivedBy, receivedAt: new Date() })
-        .where(eq(stockTransfers.id, id))
-        .returning();
-
-      if (!transfer) throw new Error("Stock transfer not found");
-
-      const items = await tx.select().from(stockTransferItems).where(eq(stockTransferItems.transferId, id));
-
-      for (const item of items) {
-        // Implement Stock Movement
-        // Asumsi: Outbound (Origin Branch) sudah dikurangi stocknya di createStockTransfer atau saat status "in_transit"
-        // Tapi untuk simplifikasi (karena nggak ada logic Outbound khusus sebelumnya): Kita update global stock kalau cabang diabaikan
-        // ATAU kita tidak ganti global stock, tapi kita bikin mutasi Lot:
-        
-        const receivedQty = item.receivedQuantity || item.quantity;
-
-        // Ambil HPP via FIFO dari fromBranch, lalu pindahkan ke toBranch
-        const originCogs = await this.deductFifoStockAndGetCogs(item.productId, receivedQty, transfer.fromBranchId || undefined, tx);
-        const unitCogs = originCogs / receivedQty;
-
-        // Masukkan kembali ke Lot di toBranch
-        await tx.insert(inventoryLots).values({
-          productId: item.productId,
-          branchId: transfer.toBranchId,
-          purchasePrice: unitCogs.toString(),
-          initialQuantity: receivedQty,
-          remainingQuantity: receivedQty,
-          inboundDate: new Date(),
-          notes: `Penerimaan Mutasi #${transfer.id}`
-        } as any);
-
-      }
-
-      return transfer;
-    });
-  }
 
   async getStockLedger(userId: string, productId?: number): Promise<any[]> {
     const { desc, and } = await import("drizzle-orm");
@@ -3455,62 +3629,10 @@ export class DatabaseStorage implements IStorage {
     }));
   }
   // === Business Verticals (Laundry, Restaurants, Barbershop) ===
-  async getAppointments(userId: string): Promise<Appointment[]> {
-    return await db.select().from(appointments).where(eq(appointments.userId, userId)).orderBy(desc(appointments.startTime));
-  }
 
-  async createAppointment(appointment: InsertAppointment): Promise<Appointment> {
-    const [result] = await db.insert(appointments).values(appointment).returning();
-    return result;
-  }
 
-  async updateAppointment(id: number, data: Partial<InsertAppointment>): Promise<Appointment> {
-    const [result] = await db.update(appointments).set(data).where(eq(appointments.id, id)).returning();
-    return result;
-  }
-
-  async deleteAppointment(id: number): Promise<void> {
-    await db.delete(appointments).where(eq(appointments.id, id));
-  }
-
-  async getRestaurantTables(userId: string): Promise<RestaurantTable[]> {
-    return await db.select().from(restaurantTables).where(eq(restaurantTables.userId, userId)).orderBy(restaurantTables.tableNumber);
-  }
-
-  async createRestaurantTable(table: InsertRestaurantTable): Promise<RestaurantTable> {
-    const [result] = await db.insert(restaurantTables).values(table).returning();
-    return result;
-  }
-
-  async updateRestaurantTable(id: number, data: Partial<InsertRestaurantTable>): Promise<RestaurantTable> {
-    const [result] = await db.update(restaurantTables).set(data).where(eq(restaurantTables.id, id)).returning();
-    return result;
-  }
-
-  async deleteRestaurantTable(id: number): Promise<void> {
-    await db.delete(restaurantTables).where(eq(restaurantTables.id, id));
-  }
-
-  async getOrderStatusLogs(orderId: string): Promise<OrderStatusLog[]> {
-    return await db.select().from(orderStatusLogs).where(eq(orderStatusLogs.orderId, orderId)).orderBy(desc(orderStatusLogs.createdAt));
-  }
-
-  async createOrderStatusLog(log: InsertOrderStatusLog): Promise<OrderStatusLog> {
-    const [result] = await db.insert(orderStatusLogs).values(log).returning();
-    return result;
-  }
-
-  async getProductModifiers(productId: number): Promise<ProductModifier[]> {
-    return await db.select().from(productModifiers).where(eq(productModifiers.productId, productId)).orderBy(productModifiers.name);
-  }
-
-  async createProductModifier(modifier: InsertProductModifier): Promise<ProductModifier> {
-    const [result] = await db.insert(productModifiers).values(modifier).returning();
-    return result;
-  }
-
-  async deleteProductModifier(id: number): Promise<void> {
-    await db.delete(productModifiers).where(eq(productModifiers.id, id));
+  async deleteAppointment(id: number, userId: string): Promise<void> {
+    await db.delete(appointments).where(and(eq(appointments.id, id), eq(appointments.userId, userId)));
   }
 }
 

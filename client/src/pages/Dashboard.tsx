@@ -15,6 +15,7 @@ import {
   BarChart3, PieChart as PieIcon, Activity, Plus,
   ArrowUpRight, ArrowDownRight, Sparkles
 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { Link } from "wouter";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Card } from "@/components/ui/card";
@@ -174,7 +175,20 @@ export default function Dashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+      <motion.div 
+        initial="hidden"
+        animate="visible"
+        variants={{
+          hidden: { opacity: 0 },
+          visible: {
+            opacity: 1,
+            transition: {
+              staggerChildren: 0.05
+            }
+          }
+        }}
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"
+      >
         <StatCard 
           label="Omzet Hari Ini" 
           value={`Rp ${todayRevenue.toLocaleString('id-ID')}`} 
@@ -220,7 +234,7 @@ export default function Dashboard() {
           color="slate" 
           trend={[ {value: 2}, {value: 5}, {value: 3}, {value: 8}, {value: 12}, {value: 15}, {value: 18} ]}
         />
-      </div>
+      </motion.div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
         <Card className="lg:col-span-2 rounded-[2rem] border-none shadow-2xl shadow-black/[0.03] overflow-hidden bg-white p-8 space-y-6 relative">
@@ -405,40 +419,48 @@ function StatCard({ label, value, sub, icon: Icon, color, trend }: any) {
   const isLoss = sub?.includes('-');
 
   return (
-    <Card className="rounded-[2.5rem] p-7 border-none shadow-xl shadow-black/[0.02] bg-white group hover:scale-[1.03] transition-all duration-500 ring-4 ring-transparent hover:ring-slate-50 relative overflow-hidden">
-      <div className="flex items-center justify-between mb-4 relative z-10">
-        <div className={`p-4 rounded-[1.25rem] ${colorMap[color] || colorMap.blue} transition-all duration-700 group-hover:rotate-6 shadow-sm`}>
-          <Icon className="w-7 h-7" />
+    <motion.div
+      variants={{
+        hidden: { opacity: 0, y: 20 },
+        visible: { opacity: 1, y: 0 }
+      }}
+      transition={{ duration: 0.4, ease: [0.2, 0.8, 0.2, 1] }}
+    >
+      <Card className="rounded-[2.5rem] p-7 border-none shadow-xl shadow-black/[0.02] bg-white group hover:scale-[1.03] transition-all duration-500 ring-4 ring-transparent hover:ring-slate-50 relative overflow-hidden">
+        <div className="flex items-center justify-between mb-4 relative z-10">
+          <div className={`p-4 rounded-[1.25rem] ${colorMap[color] || colorMap.blue} transition-all duration-700 group-hover:rotate-6 shadow-sm`}>
+            <Icon className="w-7 h-7" />
+          </div>
+          <div className="flex flex-col items-end">
+            {trend && (
+               <div className="h-[40px] w-[80px]">
+                  <ResponsiveContainer width="100%" height="100%">
+                     <LineChart data={trend}>
+                        <Line type="monotone" dataKey="value" stroke={isLoss ? '#f43f5e' : '#10b981'} strokeWidth={2.5} dot={false} />
+                     </LineChart>
+                  </ResponsiveContainer>
+               </div>
+            )}
+            <Badge variant="outline" className={cn(
+               "mt-1 text-[9px] font-black tracking-widest uppercase border-none",
+               isGrowth ? "bg-emerald-50 text-emerald-600" : isLoss ? "bg-rose-50 text-rose-600" : "bg-slate-50 text-slate-400"
+            )}>
+              {isGrowth ? <ArrowUpRight className="w-3 h-3 mr-0.5" /> : isLoss ? <ArrowDownRight className="w-3 h-3 mr-0.5" /> : null}
+              {sub}
+            </Badge>
+          </div>
         </div>
-        <div className="flex flex-col items-end">
-          {trend && (
-             <div className="h-[40px] w-[80px]">
-                <ResponsiveContainer width="100%" height="100%">
-                   <LineChart data={trend}>
-                      <Line type="monotone" dataKey="value" stroke={isLoss ? '#f43f5e' : '#10b981'} strokeWidth={2.5} dot={false} />
-                   </LineChart>
-                </ResponsiveContainer>
-             </div>
-          )}
-          <Badge variant="outline" className={cn(
-             "mt-1 text-[9px] font-black tracking-widest uppercase border-none",
-             isGrowth ? "bg-emerald-50 text-emerald-600" : isLoss ? "bg-rose-50 text-rose-600" : "bg-slate-50 text-slate-400"
-          )}>
-            {isGrowth ? <ArrowUpRight className="w-3 h-3 mr-0.5" /> : isLoss ? <ArrowDownRight className="w-3 h-3 mr-0.5" /> : null}
-            {sub}
-          </Badge>
+        <div className="relative z-10">
+          <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.25em]">{label}</h4>
+          <p className="text-3xl font-black text-slate-900 mt-2 tracking-tighter leading-none">{value}</p>
         </div>
-      </div>
-      <div className="relative z-10">
-        <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.25em]">{label}</h4>
-        <p className="text-3xl font-black text-slate-900 mt-2 tracking-tighter leading-none">{value}</p>
-      </div>
-      
-      {/* Dynamic Background Ornament */}
-      <div className={cn(
-        "absolute -bottom-12 -right-12 w-32 h-32 rounded-full blur-[60px] opacity-20 transition-all duration-700 group-hover:scale-150",
-        color === 'emerald' ? "bg-emerald-400" : color === 'blue' ? "bg-blue-400" : "bg-indigo-400"
-      )} />
-    </Card>
+        
+        {/* Dynamic Background Ornament */}
+        <div className={cn(
+          "absolute -bottom-12 -right-12 w-32 h-32 rounded-full blur-[60px] opacity-20 transition-all duration-700 group-hover:scale-150",
+          color === 'emerald' ? "bg-emerald-400" : color === 'blue' ? "bg-blue-400" : "bg-indigo-400"
+        )} />
+      </Card>
+    </motion.div>
   );
 }

@@ -63,6 +63,8 @@ import SalesReturns from "@/pages/SalesReturns";
 import B2BWholesale from "@/pages/B2BWholesale";
 import DemandAnalytics from "@/pages/accounting/DemandAnalytics";
 import SmartInsights from "@/pages/accounting/SmartInsights";
+import LaundryOperations from "@/pages/LaundryOperations";
+import BarbershopBooking from "@/pages/BarbershopBooking";
 import LogisticsHub from "@/pages/LogisticsHub";
 import CashLedger from "@/pages/accounting/CashLedger";
 import PettyCashReport from "@/pages/admin/PettyCashReport";
@@ -798,7 +800,7 @@ function AuthenticatedApp() {
 
                 {/* Master Data & Products */}
                 <Route path="/products">
-                  <ProtectedRoute allowedRoles={["admin", "sku_manager", "production", "cashier"]}>
+                  <ProtectedRoute allowedRoles={["admin", "sku_manager", "production", "cashier"]} requiredModule="inventory">
                     <Products />
                   </ProtectedRoute>
                 </Route>
@@ -841,34 +843,34 @@ function AuthenticatedApp() {
                 </Route>
 
                 <Route path="/accounting">
-                  <ProtectedRoute allowedRoles={["admin"]}>
+                  <ProtectedRoute allowedRoles={["admin"]} requiredModule="accounting">
                     <AccountingOverview />
                   </ProtectedRoute>
                 </Route>
                 <Route path="/accounting/accounts">
-                  <ProtectedRoute allowedRoles={["admin"]}>
+                  <ProtectedRoute allowedRoles={["admin"]} requiredModule="accounting">
                     <Accounts />
                   </ProtectedRoute>
                 </Route>
                 <Route path="/accounting/journal">
-                  <ProtectedRoute allowedRoles={["admin"]}>
+                  <ProtectedRoute allowedRoles={["admin"]} requiredModule="accounting">
                     <Journal />
                   </ProtectedRoute>
                 </Route>
                 <Route path="/accounting/reports">
-                  <ProtectedRoute allowedRoles={["admin"]}>
+                  <ProtectedRoute allowedRoles={["admin"]} requiredModule="accounting">
                     <Reports />
                   </ProtectedRoute>
                 </Route>
 
                 {/* Production */}
                 <Route path="/production/boms">
-                  <ProtectedRoute allowedRoles={["admin", "production"]}>
+                  <ProtectedRoute allowedRoles={["admin", "production"]} requiredModule="production">
                     <BOMList />
                   </ProtectedRoute>
                 </Route>
                 <Route path="/production/ai">
-                  <ProtectedRoute allowedRoles={["admin", "production"]}>
+                  <ProtectedRoute allowedRoles={["admin", "production"]} requiredModule="production">
                     <ProductionAI />
                   </ProtectedRoute>
                 </Route>
@@ -900,7 +902,21 @@ function AuthenticatedApp() {
                 <Route path="/reports/stock-ledger" component={StockLedger} />
                 <Route path="/reports/sales-summary" component={SalesSummary} />
                 <Route path="/reports/sales-items" component={SalesItems} />
-                <Route path="/customers" component={Customers} />
+                <Route path="/customers">
+                  <ProtectedRoute requiredModule="pos">
+                    <Customers />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/laundry/operations">
+                  <ProtectedRoute requiredModule="pos">
+                    <LaundryOperations />
+                  </ProtectedRoute>
+                </Route>
+                <Route path="/barbershop/booking">
+                  <ProtectedRoute requiredModule="pos">
+                    <BarbershopBooking />
+                  </ProtectedRoute>
+                </Route>
 
 
                 {/* Enterprise Routes */}
@@ -928,7 +944,7 @@ function AuthenticatedApp() {
                 <Route path="/sales/returns" component={SalesReturns} />
                 <Route path="/accounting/analytics" component={DemandAnalytics} />
                 <Route path="/accounting/insights">
-                  <ProtectedRoute allowedRoles={["admin"]}>
+                  <ProtectedRoute allowedRoles={["admin"]} requiredModule="accounting">
                     <SmartInsights />
                   </ProtectedRoute>
                 </Route>

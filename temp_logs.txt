@@ -1,0 +1,49 @@
+﻿4:21:03 AM [express] POST /api/sales/invoices 500 in 129ms
+>>> [POST /api/sales/invoices] RECEIVED DATA: {
+  "customerId": 6,
+  "totalAmount": 100000,
+  "paymentMethod": "transfer",
+  "paymentStatus": "pending",
+  "dueDate": "2026-04-26T00:00:00.000Z",
+  "items": [
+    {
+      "productId": 8,
+      "quantity": 1,
+      "unitPrice": 100000,
+      "subtotal": 100000
+    }
+  ]
+}
+4:21:04 AM [express] POST /api/sales/invoices 500 in 76ms
+>>> [POST /api/sales/invoices] RECEIVED DATA: {
+  "customerId": 6,
+  "totalAmount": 100000,
+  "paymentMethod": "transfer",
+  "paymentStatus": "pending",
+  "dueDate": "2026-04-26T00:00:00.000Z",
+  "items": [
+    {
+      "productId": 8,
+      "quantity": 1,
+      "unitPrice": 100000,
+      "subtotal": 100000
+    }
+  ]
+}
+4:21:05 AM [express] POST /api/sales/invoices 500 in 84ms
+>>> [POST /api/sales/invoices] RECEIVED DATA: {
+  "customerId": 6,
+  "totalAmount": 100000,
+  "paymentMethod": "transfer",
+  "paymentStatus": "pending",
+  "dueDate": "2026-04-26T00:00:00.000Z",
+  "items": [
+    {
+      "productId": 8,
+      "quantity": 1,
+      "unitPrice": 100000,
+      "subtotal": 100000
+    }
+  ]
+}
+4:21:06 AM [express] POST /api/sales/invoices 500 in 560ms

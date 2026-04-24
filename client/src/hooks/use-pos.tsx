@@ -392,6 +392,14 @@ export function POSProvider({ children }: { children: ReactNode }) {
         }
     });
 
+    const { data: tables, isLoading: isLoadingTables } = useQuery<any[]>({
+        queryKey: ["/api/tables"],
+        queryFn: async () => {
+            const res = await fetch("/api/tables");
+            return res.json();
+        }
+    });
+
     const createSaleMutation = useMutation({
         mutationFn: async (data: { sale: any, items: any[] }) => {
             const res = await fetch(api.pos.sales.create.path, {
