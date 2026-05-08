@@ -3489,17 +3489,7 @@ export class DatabaseStorage implements IStorage {
     return results;
   }
 
-  // === Phase 16: RMA & Sales Returns ===
-  async createSalesReturn(data: InsertSalesReturn & { items: InsertSalesReturnItem[] }): Promise<SalesReturn> {
-    return await db.transaction(async (tx) => {
-      const { items, ...returnData } = data;
-      const [newReturn] = await tx.insert(salesReturns).values(returnData).returning();
-      for (const item of items) {
-        await tx.insert(salesReturnItems).values({ ...item, returnId: newReturn.id } as any);
-      }
-      return newReturn;
-    });
-  }
+
 
   async completeSalesReturn(id: number, userId: string): Promise<SalesReturn> {
     const { eq, and } = await import("drizzle-orm");
@@ -3631,9 +3621,7 @@ export class DatabaseStorage implements IStorage {
   // === Business Verticals (Laundry, Restaurants, Barbershop) ===
 
 
-  async deleteAppointment(id: number, userId: string): Promise<void> {
-    await db.delete(appointments).where(and(eq(appointments.id, id), eq(appointments.userId, userId)));
-  }
+
 }
 
 export const storage = new DatabaseStorage();

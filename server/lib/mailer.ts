@@ -1,9 +1,4 @@
-let nodemailer: any;
-try {
-  nodemailer = (await import("nodemailer")).default;
-} catch (e) {
-  console.warn("[MAILER] Nodemailer tidak ditemukan, menggunakan mode mock penuh.");
-}
+import nodemailer from "nodemailer";
 
 // Konfigurasi mailer (bisa menggunakan Mailtrap untuk testing atau Gmail SMTP)
 // Gunakan variabel lingkungan (.env) untuk kredensial asli
