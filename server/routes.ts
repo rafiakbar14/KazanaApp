@@ -4396,7 +4396,8 @@ Tugas Anda:
 
   app.put(api.procurement.suppliers.update.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
     try {
-      const supplier = await storage.updateSupplier(Number(req.params.id), req.body);
+      const adminId = await getTeamAdminId(req);
+      const supplier = await storage.updateSupplier(Number(req.params.id), adminId, req.body);
       res.json(supplier);
     } catch (e) {
       res.status(500).json({ message: "Gagal mengupdate supplier" });
@@ -4425,7 +4426,8 @@ Tugas Anda:
 
   app.post(api.procurement.complete.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
     try {
-      const session = await storage.completePurchaseOrder(Number(req.params.id));
+      const adminId = await getTeamAdminId(req);
+      const session = await storage.completePurchaseOrder(Number(req.params.id), adminId);
       res.json(session);
     } catch (e) {
       res.status(500).json({ message: "Gagal menyelesaikan PO" });
@@ -4461,8 +4463,9 @@ Tugas Anda:
 
   app.get(api.pricing.tiered.list.path, isAuthenticated, async (req, res) => {
     try {
+      const adminId = await getTeamAdminId(req);
       const productId = Number(req.params.productId);
-      const tiers = await storage.getTieredPricing(productId);
+      const tiers = await storage.getTieredPricing(productId, adminId);
       res.json(tiers);
     } catch (e) {
       res.status(500).json({ message: "Gagal mengambil paket harga" });
@@ -4481,7 +4484,8 @@ Tugas Anda:
 
   app.delete(api.pricing.tiered.delete.path, isAuthenticated, requireRole("admin"), async (req, res) => {
     try {
-      await storage.deleteTieredPricing(Number(req.params.id));
+      const adminId = await getTeamAdminId(req);
+      await storage.deleteTieredPricing(Number(req.params.id), adminId);
       res.sendStatus(204);
     } catch (e) {
       res.status(500).json({ message: "Gagal menghapus paket harga" });
@@ -4490,8 +4494,9 @@ Tugas Anda:
 
   app.get(api.bundling.list.path, isAuthenticated, async (req, res) => {
     try {
+      const adminId = await getTeamAdminId(req);
       const parentProductId = Number(req.params.parentProductId);
-      const bundles = await storage.getProductBundles(parentProductId);
+      const bundles = await storage.getProductBundles(parentProductId, adminId);
       res.json(bundles);
     } catch (e) {
       res.status(500).json({ message: "Gagal mengambil data bundle" });
@@ -4500,7 +4505,8 @@ Tugas Anda:
 
   app.post(api.bundling.create.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
     try {
-      const bundle = await storage.createProductBundle(req.body);
+      const adminId = await getTeamAdminId(req);
+      const bundle = await storage.createProductBundle({ ...req.body, userId: adminId });
       res.status(201).json(bundle);
     } catch (e) {
       res.status(500).json({ message: "Gagal membuat bundle" });
@@ -4509,13 +4515,13 @@ Tugas Anda:
 
   app.delete(api.bundling.delete.path, isAuthenticated, requireRole("admin"), async (req, res) => {
     try {
-      await storage.deleteProductBundle(Number(req.params.id));
+      const adminId = await getTeamAdminId(req);
+      await storage.deleteProductBundle(Number(req.params.id), adminId);
       res.sendStatus(204);
     } catch (e) {
       res.status(500).json({ message: "Gagal menghapus bundle" });
     }
   });
-
 
   // === Phase 20: Analytics & Forecasting ===
   app.get(api.analytics.inventoryDemand.path, isAuthenticated, requireRole("admin", "sku_manager"), async (req, res) => {
@@ -4702,7 +4708,7 @@ Tugas Anda:
   });
 
   // === Phase 9: Real-time Financial Dashboard ===
-  app.get(api.accounting.summary.path, isAuthenticated, requireRole("admin"), requireModule("accounting"), async (req, res) => {
+  app.get(api.backup.stats.path, isAuthenticated, requireRole("admin"), requireModule("accounting"), async (req, res) => {
     try {
       const adminId = await getTeamAdminId(req);
       const sessionList = await db.select().from(opnameSessions).where(eq(opnameSessions.userId, adminId));
@@ -5049,16 +5055,14 @@ Tugas Anda:
       if (!sale) return res.status(404).json({ message: "Penjualan tidak ditemukan atau akses ditolak" });
 
       // 1. Create Return record
-      const salesReturn = await storage.createSalesReturn({
+      const salesReturn = await storage.createSalesReturn(adminId, {
         saleId,
         returnNumber: returnNumber || `RMA-${saleId}-${Date.now()}`,
         reason,
         refundAmount: refundAmount || sale.totalAmount,
         refundMethod: refundMethod || "cash",
         notes,
-        userId: adminId,
-        items
-      });
+      }, items);
 
       // 2. Complete/Process the return (restock, journal, loyalty)
       await storage.completeSalesReturn(salesReturn.id, adminId);
