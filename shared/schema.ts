@@ -44,14 +44,14 @@ export const products = pgTable("products", {
   subCategory: text("sub_category"),
   productCode: text("product_code"),
   description: text("description"),
-  currentStock: decimal("current_stock").default("0").notNull(),
+  currentStock: decimal("current_stock").default(0).notNull(),
   unitCost: decimal("unit_cost").default(0),
   sellingPrice: decimal("selling_price").default(0),
   photoUrl: text("photo_url"),
   userId: text("user_id").notNull(),
   locationType: text("location_type", { enum: ["toko", "gudang"] }).default("toko"),
   productType: text("product_type", { enum: ["finished_good", "raw_material", "component"] }).default("finished_good").notNull(),
-  minStock: decimal("min_stock").default("0").notNull(),
+  minStock: decimal("min_stock").default(0).notNull(),
   isTaxable: integer("is_taxable").default(1).notNull(),
   taxRate: decimal("tax_rate").default(11.0).notNull(),
   isBundled: integer("is_bundled").default(0).notNull(),
@@ -233,7 +233,7 @@ export const inboundItems = pgTable("inbound_items", {
   sessionId: integer("session_id").references(() => inboundSessions.id).notNull(),
   productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
   quantityReceived: decimal("quantity_received").notNull(),
-  unitCost: decimal("unit_cost").default("0").notNull(),
+  unitCost: decimal("unit_cost").default(0).notNull(),
   expiryDate: timestamp("expiry_date"),
   notes: text("notes"),
 });
@@ -524,31 +524,66 @@ export const settings = pgTable("settings", {
 
 export const accounts = pgTable("accounts", {
   id: serial("id").primaryKey(),
-  code: text("code").notNull(),
+  code: text("code").notNull().unique(),
   name: text("name").notNull(),
-  type: text("type", { enum: ["asset", "liability", "equity", "income", "expense"] }).notNull(),
+  accountType: text("account_type", {
+    enum: ["Asset", "Liability", "Equity", "Revenue", "Expense", "COGS"]
+  }).notNull(),
+  normalBalance: text("normal_balance", { enum: ["debit", "credit"] }).notNull(),
+  parentId: integer("parent_id").references((): any => accounts.id),
+  isHeader: integer("is_header").default(0).notNull(),
   description: text("description"),
   userId: text("user_id").notNull(),
+  active: integer("active").default(1).notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const journalEntries = pgTable("journal_entries", {
   id: serial("id").primaryKey(),
-  date: timestamp("date").defaultNow().notNull(),
+  entryDate: timestamp("entry_date").defaultNow().notNull(),
+  transactionType: text("transaction_type").notNull(), // SALE, PURCHASE, PAYMENT, RECEIPT, ADJUSTMENT, etc.
+  referenceNo: text("reference_no"),
   description: text("description").notNull(),
-  reference: text("reference"),
+  posted: integer("posted").default(0).notNull(), // 0 = draft, 1 = posted
+  branchId: integer("branch_id").references(() => branches.id),
   userId: text("user_id").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
+export const journalLines = pgTable("journal_lines", {
+  id: serial("id").primaryKey(),
+  journalEntryId: integer("journal_entry_id").references(() => journalEntries.id, { onDelete: "cascade" }).notNull(),
+  accountId: integer("account_id").references(() => accounts.id).notNull(),
+  debit: decimal("debit").default(0).notNull(),
+  credit: decimal("credit").default(0).notNull(),
+  description: text("description"),
+});
+
+// Keep journalItems for backward compatibility (will be migrated to journalLines)
 export const journalItems = pgTable("journal_items", {
   id: serial("id").primaryKey(),
   entryId: integer("entry_id").references(() => journalEntries.id, { onDelete: "cascade" }).notNull(),
   accountId: integer("account_id").references(() => accounts.id).notNull(),
-  branchId: integer("branch_id").references(() => branches.id), // For Branch-specific Balance Sheets
+  branchId: integer("branch_id").references(() => branches.id),
   debit: decimal("debit").default(0).notNull(),
   credit: decimal("credit").default(0).notNull(),
   userId: text("user_id").notNull(),
+});
+
+// Stock movements for Kartu Stok report
+export const stockMovements = pgTable("stock_movements", {
+  id: serial("id").primaryKey(),
+  productId: integer("product_id").references(() => products.id, { onDelete: "cascade" }).notNull(),
+  branchId: integer("branch_id").references(() => branches.id),
+  movementDate: timestamp("movement_date").defaultNow().notNull(),
+  movementType: text("movement_type").notNull(), // PURCHASE, SALE, TRANSFER_IN, TRANSFER_OUT, ADJUSTMENT, ASSEMBLY
+  referenceNo: text("reference_no"),
+  description: text("description"),
+  quantityChange: decimal("quantity_change").notNull(), // Positive for IN, negative for OUT
+  unitCost: decimal("unit_cost").default(0).notNull(),
+  totalCost: decimal("total_cost").default(0).notNull(),
+  userId: text("user_id").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 export const fixedAssets = pgTable("fixed_assets", {
@@ -991,6 +1026,8 @@ export const insertSaleItemSchema = createInsertSchema(saleItems).omit({ id: tru
 export const insertSupplierSchema = createInsertSchema(suppliers).omit({ id: true, createdAt: true });
 export const insertAccountSchema = createInsertSchema(accounts).omit({ id: true, createdAt: true });
 export const insertJournalEntrySchema = createInsertSchema(journalEntries).omit({ id: true, createdAt: true });
+export const insertJournalLineSchema = createInsertSchema(journalLines).omit({ id: true });
+export const insertStockMovementSchema = createInsertSchema(stockMovements).omit({ id: true, createdAt: true });
 export const insertJournalItemSchema = createInsertSchema(journalItems).omit({ id: true });
 export const insertFixedAssetSchema = createInsertSchema(fixedAssets).omit({ id: true, createdAt: true });
 export const insertPosDeviceSchema = createInsertSchema(posDevices).omit({ id: true, createdAt: true });
@@ -1063,6 +1100,10 @@ export type InsertCustomer = z.infer<typeof insertCustomerSchema>;
 export type Sale = typeof sales.$inferSelect;
 export type InsertSale = z.infer<typeof insertSaleSchema>;
 export type SaleItem = typeof saleItems.$inferSelect;
+export type JournalLine = typeof journalLines.$inferSelect;
+export type InsertJournalLine = z.infer<typeof insertJournalLineSchema>;
+export type StockMovement = typeof stockMovements.$inferSelect;
+export type InsertStockMovement = z.infer<typeof insertStockMovementSchema>;
 export type InsertSaleItem = z.infer<typeof insertSaleItemSchema>;
 export type Account = typeof accounts.$inferSelect;
 export type InsertAccount = z.infer<typeof insertAccountSchema>;

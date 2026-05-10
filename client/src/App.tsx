@@ -63,6 +63,7 @@ import SalesReturns from "@/pages/SalesReturns";
 import B2BWholesale from "@/pages/B2BWholesale";
 import DemandAnalytics from "@/pages/accounting/DemandAnalytics";
 import SmartInsights from "@/pages/accounting/SmartInsights";
+import GeneralLedgerReport from "@/pages/GeneralLedgerReport";
 import LaundryOperations from "@/pages/LaundryOperations";
 import BarbershopBooking from "@/pages/BarbershopBooking";
 import LogisticsHub from "@/pages/LogisticsHub";
@@ -892,6 +893,7 @@ function AuthenticatedApp() {
                 <Route path="/production/assembly" component={AssemblySessions} />
                 <Route path="/production/assembly/:id" component={AssemblySessionDetail} />
                 <Route path="/accounting/assets" component={Assets} />
+                <Route path="/accounting/general-ledger" component={GeneralLedgerReport} />
                 <Route path="/accounting/inventory-valuation" component={InventoryValuation} />
                 <Route path="/sales/invoices" component={Invoices} />
                 <Route path="/sales/invoices/new" component={NewInvoice} />

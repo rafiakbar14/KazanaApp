@@ -240,6 +240,7 @@ export function Sidebar() {
         { name: "Ringkasan Finansial", href: "/accounting", icon: LayoutDashboard, roles: ["admin"] },
         { name: "Daftar Akun (COA)", href: "/accounting/accounts", icon: ClipboardList, roles: ["admin"] },
         { name: "Buku Besar (Journal)", href: "/accounting/journal", icon: BookOpen, roles: ["admin"] },
+        { name: "General Ledger Report", href: "/accounting/general-ledger", icon: FileText, roles: ["admin"] },
         { name: "Valuasi Persediaan", href: "/accounting/inventory-valuation", icon: Layers, roles: ["admin"] },
         { name: "Analitik Permintaan", href: "/accounting/analytics", icon: BarChart3, roles: ["admin"] },
         { name: "Smart Insights AI", href: "/accounting/insights", icon: Sparkles, roles: ["admin"] },

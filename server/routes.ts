@@ -5513,6 +5513,144 @@ Tugas Anda:
       res.status(500).json({ message: "Gagal menghapus modifier" });
     }
   });
+  // ===== REPORTING SYSTEM API =====
+  
+  /**
+   * Generate General Ledger Report (Buku Besar - Mutasi)
+   * GET /api/reports/general-ledger?accountId=1&dateFrom=2024-01-01&dateTo=2024-12-31&branchId=1
+   */
+  app.get("/api/reports/general-ledger", isAuthenticated, async (req, res) => {
+    try {
+      const { accountId, dateFrom, dateTo, branchId } = req.query;
+      
+      if (!accountId || !dateFrom || !dateTo) {
+        return res.status(400).json({ 
+          message: "Missing required parameters: accountId, dateFrom, dateTo" 
+        });
+      }
+
+      const { reportFunctions } = await import("./reports");
+      const report = await reportFunctions.generalLedger({
+        accountId: Number(accountId),
+        dateFrom: String(dateFrom),
+        dateTo: String(dateTo),
+        branchId: branchId ? Number(branchId) : undefined,
+      });
+
+      res.json(report);
+    } catch (err: any) {
+      console.error("General Ledger error:", err);
+      res.status(500).json({ message: err.message || "Failed to generate General Ledger report" });
+    }
+  });
+
+  /**
+   * Generate Balance Sheet Report
+   * GET /api/reports/balance-sheet?dateAsOf=2024-12-31&branchId=1
+   */
+  app.get("/api/reports/balance-sheet", isAuthenticated, async (req, res) => {
+    try {
+      const { dateAsOf, branchId } = req.query;
+      
+      if (!dateAsOf) {
+        return res.status(400).json({ message: "Missing required parameter: dateAsOf" });
+      }
+
+      const { reportFunctions } = await import("./reports");
+      const report = await reportFunctions.balanceSheet(
+        String(dateAsOf),
+        branchId ? Number(branchId) : undefined
+      );
+
+      res.json(report);
+    } catch (err: any) {
+      console.error("Balance Sheet error:", err);
+      res.status(500).json({ message: err.message || "Failed to generate Balance Sheet report" });
+    }
+  });
+
+  /**
+   * Generate Profit & Loss Report
+   * GET /api/reports/profit-loss?dateFrom=2024-01-01&dateTo=2024-12-31&branchId=1
+   */
+  app.get("/api/reports/profit-loss", isAuthenticated, async (req, res) => {
+    try {
+      const { dateFrom, dateTo, branchId } = req.query;
+      
+      if (!dateFrom || !dateTo) {
+        return res.status(400).json({ 
+          message: "Missing required parameters: dateFrom, dateTo" 
+        });
+      }
+
+      const { reportFunctions } = await import("./reports");
+      const report = await reportFunctions.profitLoss(
+        String(dateFrom),
+        String(dateTo),
+        branchId ? Number(branchId) : undefined
+      );
+
+      res.json(report);
+    } catch (err: any) {
+      console.error("Profit & Loss error:", err);
+      res.status(500).json({ message: err.message || "Failed to generate Profit & Loss report" });
+    }
+  });
+
+  /**
+   * Generate Trial Balance Report
+   * GET /api/reports/trial-balance?dateAsOf=2024-12-31&branchId=1
+   */
+  app.get("/api/reports/trial-balance", isAuthenticated, async (req, res) => {
+    try {
+      const { dateAsOf, branchId } = req.query;
+      
+      if (!dateAsOf) {
+        return res.status(400).json({ message: "Missing required parameter: dateAsOf" });
+      }
+
+      const { reportFunctions } = await import("./reports");
+      const report = await reportFunctions.trialBalance(
+        String(dateAsOf),
+        branchId ? Number(branchId) : undefined
+      );
+
+      res.json(report);
+    } catch (err: any) {
+      console.error("Trial Balance error:", err);
+      res.status(500).json({ message: err.message || "Failed to generate Trial Balance report" });
+    }
+  });
+
+  /**
+   * Generate Stock Movement Report (Kartu Stok)
+   * GET /api/reports/stock-movement?productId=1&dateFrom=2024-01-01&dateTo=2024-12-31&branchId=1
+   */
+  app.get("/api/reports/stock-movement", isAuthenticated, async (req, res) => {
+    try {
+      const { productId, dateFrom, dateTo, branchId } = req.query;
+      
+      if (!productId || !dateFrom || !dateTo) {
+        return res.status(400).json({ 
+          message: "Missing required parameters: productId, dateFrom, dateTo" 
+        });
+      }
+
+      const { reportFunctions } = await import("./reports");
+      const report = await reportFunctions.stockMovement(
+        Number(productId),
+        String(dateFrom),
+        String(dateTo),
+        branchId ? Number(branchId) : undefined
+      );
+
+      res.json(report);
+    } catch (err: any) {
+      console.error("Stock Movement error:", err);
+      res.status(500).json({ message: err.message || "Failed to generate Stock Movement report" });
+    }
+  });
+
 
   return httpServer;
 }
