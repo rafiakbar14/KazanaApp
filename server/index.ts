@@ -32,13 +32,13 @@ if (process.env.NODE_ENV === "production") {
   }));
 }
 
-// Apply rate limiting (Sangat longgar di development)
+// Apply rate limiting (Strict in production, loose in development)
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100000, 
+  max: process.env.NODE_ENV === "production" ? 100 : 100000,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { message: "Rate limit exceeded" }
+  message: { message: "Rate limit exceeded. Please try again later." }
 });
 
 if (process.env.NODE_ENV === "production") {

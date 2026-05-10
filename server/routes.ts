@@ -32,7 +32,12 @@ const VALID_MODULES = [
 ];
 
 
-const upload = multer({ dest: path.join(os.tmpdir(), "kazana-uploads"), limits: { fileSize: 50 * 1024 * 1024 } });
+// Use persistent directory for uploads instead of temp directory
+const uploadDir = path.join(process.cwd(), "uploads_temp");
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+const upload = multer({ dest: uploadDir, limits: { fileSize: 50 * 1024 * 1024 } });
 
 async function uploadToObjectStorage(file: Express.Multer.File): Promise<string> {
   const fileBuffer = fs.readFileSync(file.path);

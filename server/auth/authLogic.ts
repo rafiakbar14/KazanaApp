@@ -27,8 +27,9 @@ export function getSession() {
     saveUninitialized: false,
     cookie: {
       httpOnly: true,
-      secure: false, // Set to false because VPS uses HTTP via IP address
+      secure: process.env.NODE_ENV === "production", // Auto-enable in production
       maxAge: sessionTtl,
+      sameSite: process.env.NODE_ENV === "production" ? "strict" : "lax",
     },
   });
 
